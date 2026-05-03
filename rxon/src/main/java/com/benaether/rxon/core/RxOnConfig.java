@@ -27,6 +27,10 @@ import java.util.Map;
 
 import io.reactivex.rxjava3.core.Scheduler;
 
+/**
+ * Main configuration class for the RxOn library.
+ * Use the {@link #builder()} to initialize the library.
+ */
 public final class RxOnConfig {
     private static RxOnErrorMapper rxOnErrorMapper = t -> t;
     private static final Map<WorkScheduler, Scheduler> customSchedulers =
@@ -36,14 +40,26 @@ public final class RxOnConfig {
 
     private RxOnConfig() {}
 
+    /**
+     * Map an error using the configured error mapper.
+     * @param t throwable
+     * @return mapped throwable
+     */
     public static Throwable mapError(Throwable t) {
         return rxOnErrorMapper.map(t);
     }
 
+    /** @return true if debug mode is enabled */
     public static boolean isDebug() { return debug; }
 
+    /** @return the configured logger */
     public static RxOnLogger getLogger() { return rxOnLogger; }
 
+    /**
+     * Get the scheduler for the given type.
+     * @param type scheduler type
+     * @return RxJava scheduler
+     */
     public static Scheduler getScheduler(WorkScheduler type) {
         return customSchedulers.computeIfAbsent(type, t -> switch (t) {
             case DATA_READ -> DefaultSchedulers.dataRead();
@@ -54,23 +70,38 @@ public final class RxOnConfig {
         });
     }
 
+    /** Step for debug configuration */
     public interface DebugStep {
+        /** @param isDebug enable debug mode
+         * @return next step */
         LoggerStep debug(boolean isDebug);
     }
 
+    /** Step for logger configuration */
     public interface LoggerStep {
+        /** @param rxOnLogger custom logger
+         * @return next step */
         ErrorMapperStep logger(RxOnLogger rxOnLogger);
     }
 
+    /** Step for error mapper configuration */
     public interface ErrorMapperStep {
+        /** @param mapper custom error mapper
+         * @return next step */
         BuildStep errorMapper(RxOnErrorMapper mapper);
     }
 
+    /** Step for final configuration and initialization */
     public interface BuildStep {
+        /** @param type scheduler type
+         * @param scheduler custom scheduler
+         * @return this step */
         BuildStep scheduler(WorkScheduler type, Scheduler scheduler);
+        /** Initialize the library with the configured values */
         void init();
     }
 
+    /** @return a new builder instance */
     public static DebugStep builder() {
         return new Builder();
     }

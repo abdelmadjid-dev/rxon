@@ -18,16 +18,39 @@ package com.benaether.rxon.scopes;
 
 import io.reactivex.rxjava3.functions.Function;
 
+/**
+ * Functional interfaces for synchronous operations that can throw exceptions.
+ */
 public class ScopedFunctions {
 
 
+    /**
+     * Functional interface for a function that can throw an exception.
+     * @param <T> input type
+     * @param <R> output type
+     */
     @FunctionalInterface
     public interface ThrowingFn<T, R> extends Function<T, R> {
+        /**
+         * Apply the function.
+         * @param t input
+         * @return output
+         * @throws Exception if something goes wrong
+         */
         R apply(T t) throws Exception;
     }
 
+    /**
+     * Functional interface for a function that returns nothing and can throw an exception.
+     * @param <T> input type
+     */
     @FunctionalInterface
     public interface ThrowingUnitFn<T> {
+        /**
+         * Apply the function.
+         * @param t input
+         * @throws Exception if something goes wrong
+         */
         void apply(T t) throws Exception;
     }
 

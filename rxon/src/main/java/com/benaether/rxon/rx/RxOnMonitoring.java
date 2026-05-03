@@ -21,12 +21,16 @@ import com.benaether.rxon.core.RxOnConfig;
 import hu.akarnokd.rxjava3.debug.RxJavaAssemblyTracking;
 import io.reactivex.rxjava3.plugins.RxJavaPlugins;
 
+/**
+ * Internal class for monitoring RxJava performance and assembly tracking.
+ */
 public final class RxOnMonitoring {
     private static final String TAG = RxOnMonitoring.class.getName();
     private static final long SLOW_TASK_MS = 100;
 
     private RxOnMonitoring() {}
 
+    /** Initialize monitoring and error handling */
     public static void init() {
         if (!RxOnConfig.isDebug()) {
             return;

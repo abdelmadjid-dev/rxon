@@ -25,6 +25,7 @@ import androidx.annotation.NonNull;
  */
 public final class Unit {
 
+    /** Singleton instance of Unit. */
     public static final Unit INSTANCE = new Unit();
 
     private Unit() {}

@@ -16,6 +16,9 @@
 
 package com.benaether.rxon.rx;
 
+/**
+ * Default implementation of {@link RxOnLogger} that logs to System.out and System.err.
+ */
 public class DefaultRxOnLogger implements RxOnLogger {
     @Override
     public void e(String tag, String msg, Throwable t) {

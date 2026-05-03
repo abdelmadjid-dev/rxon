@@ -16,8 +16,16 @@
 
 package com.benaether.rxon.core;
 
+/**
+ * Interface for mapping library errors.
+ */
 @FunctionalInterface
 public interface RxOnErrorMapper {
+    /**
+     * Map a throwable to another throwable.
+     * @param throwable source error
+     * @return target error
+     */
     Throwable map(Throwable throwable);
 }
 

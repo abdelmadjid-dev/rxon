@@ -16,10 +16,38 @@
 
 package com.benaether.rxon.rx;
 
+/**
+ * Interface for library logging.
+ */
 public interface RxOnLogger {
+    /**
+     * Log an error.
+     * @param tag tag
+     * @param message message
+     * @param t throwable
+     */
     void e(String tag, String message, Throwable t);
+
+    /**
+     * Log a warning.
+     * @param tag tag
+     * @param message message
+     * @param t throwable
+     */
     void w(String tag, String message, Throwable t);
+
+    /**
+     * Log info.
+     * @param tag tag
+     * @param message message
+     */
     void i(String tag, String message);
+
+    /**
+     * Log debug.
+     * @param tag tag
+     * @param message message
+     */
     void d(String tag, String message);
 }
 

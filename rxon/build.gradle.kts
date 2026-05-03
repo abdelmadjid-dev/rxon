@@ -2,6 +2,7 @@ plugins {
     id("java-library")
     id("maven-publish")
     id("signing")
+    alias(libs.plugins.sonatype.central.publisher)
 }
 
 group = "com.benaether"
@@ -52,16 +53,6 @@ publishing {
             }
         }
     }
-    repositories {
-        maven {
-            name = "OSSRH"
-            url = uri("https://central.sonatype.com/api/v1/publisher/deployments/maven")
-            credentials {
-                username = project.findProperty("ossrhUsername")?.toString()
-                password = project.findProperty("ossrhPassword")?.toString()
-            }
-        }
-    }
 }
 
 signing {
@@ -71,4 +62,9 @@ signing {
         useInMemoryPgpKeys(signingKey, signingPassword)
         sign(publishing.publications["mavenJava"])
     }
+}
+
+centralPortal {
+    username = project.findProperty("ossrhUsername")?.toString()
+    password = project.findProperty("ossrhPassword")?.toString()
 }

@@ -18,11 +18,20 @@ package com.benaether.rxon.rx;
 
 import com.benaether.rxon.core.RxOnConfig;
 
+/**
+ * Internal logger wrapper that handles root cause extraction for RxJava assembly exceptions.
+ */
 public final class RxLog {
 
     private RxLog() {
     }
 
+    /**
+     * Log an error.
+     * @param tag tag
+     * @param message message
+     * @param throwable throwable
+     */
     public static void e(String tag, String message, Throwable throwable) {
         RxOnLogger log = RxOnConfig.getLogger();
         if (RxOnConfig.isDebug()) {
@@ -39,6 +48,12 @@ public final class RxLog {
 
     }
 
+    /**
+     * Log a warning.
+     * @param tag tag
+     * @param message message
+     * @param throwable throwable
+     */
     public static void w(String tag, String message, Throwable throwable) {
         RxOnLogger log = RxOnConfig.getLogger();
         if (RxOnConfig.isDebug()) {
@@ -55,10 +70,20 @@ public final class RxLog {
 
     }
 
+    /**
+     * Log info.
+     * @param tag tag
+     * @param message message
+     */
     public static void i(String tag, String message) {
         RxOnConfig.getLogger().i(tag, message);
     }
 
+    /**
+     * Log debug.
+     * @param tag tag
+     * @param message message
+     */
     public static void d(String tag, String message) {
         RxOnConfig.getLogger().d(tag, message);
     }

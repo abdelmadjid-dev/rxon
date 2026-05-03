@@ -32,4 +32,5 @@ retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
+sonatype-central-publisher = { id = "net.thebugmc.gradle.sonatype-central-portal-publisher", version = "1.2.4" }
 

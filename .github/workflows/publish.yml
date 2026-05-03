@@ -21,7 +21,7 @@ jobs:
       run: chmod +x gradlew
 
     - name: Publish to Maven Central
-      run: ./gradlew :rxon:publish
+      run: ./gradlew :rxon:publishToCentralPortal
       env:
         ORG_GRADLE_PROJECT_ossrhUsername: ${{ secrets.OSSRH_USERNAME }}
         ORG_GRADLE_PROJECT_ossrhPassword: ${{ secrets.OSSRH_PASSWORD }}

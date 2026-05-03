@@ -20,6 +20,9 @@ import java.util.concurrent.*;
 import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 
+/**
+ * Default internal schedulers used by the library.
+ */
 public final class DefaultSchedulers {
     private DefaultSchedulers() {}
 
@@ -68,10 +71,15 @@ public final class DefaultSchedulers {
         static final Scheduler SCHEDULER = Schedulers.from(EXECUTOR);
     }
 
+    /** @return data write scheduler */
     public static Scheduler dataWrite() { return DataWriteHolder.SCHEDULER; }
+    /** @return data read scheduler */
     public static Scheduler dataRead() { return DataReadHolder.SCHEDULER; }
+    /** @return IO scheduler */
     public static Scheduler io() { return IoHolder.SCHEDULER; }
+    /** @return compute scheduler */
     public static Scheduler compute() { return ComputeHolder.SCHEDULER; }
+    /** @return main thread scheduler */
     public static Scheduler main() { return Schedulers.trampoline(); }
 }
 

@@ -19,6 +19,9 @@ package com.benaether.rxon.scopes;
 import com.benaether.rxon.core.Stream;
 import com.benaether.rxon.core.Work;
 
+/**
+ * Functional interfaces for defining reusable workflows.
+ */
 public final class ScopedWorkflows {
 
     private ScopedWorkflows() {}
@@ -27,13 +30,24 @@ public final class ScopedWorkflows {
     // GENERIC WORKFLOWS (USED BY Work)
     // ===========================================================================================
 
+    /**
+     * Functional interface for a workflow with input.
+     * @param <I> input type
+     * @param <O> output type
+     */
     @FunctionalInterface
     public interface Workflow<I, O> {
+        /** @param input input @return Work */
         Work<O> apply(I input);
     }
 
+    /**
+     * Functional interface for a workflow with no input.
+     * @param <O> output type
+     */
     @FunctionalInterface
     public interface Workflow0<O> {
+        /** @return Work */
         Work<O> apply();
     }
 
@@ -41,13 +55,24 @@ public final class ScopedWorkflows {
     // STREAM WORKFLOWS (USED BY Stream)
     // ===========================================================================================
 
+    /**
+     * Functional interface for a stream workflow with input.
+     * @param <I> input type
+     * @param <O> output type
+     */
     @FunctionalInterface
     public interface StreamWorkflow<I, O> {
+        /** @param input input @return Stream */
         Stream<O> apply(I input);
     }
 
+    /**
+     * Functional interface for a stream workflow with no input.
+     * @param <O> output type
+     */
     @FunctionalInterface
     public interface StreamWorkflow0<O> {
+        /** @return Stream */
         Stream<O> apply();
     }
 }
