@@ -165,6 +165,8 @@ import io.reactivex.rxjava3.functions.Predicate;
  *   <li>ViewModels compose {@code Work}</li>
  *   <li>UI layers execute and observe results</li>
  * </ul>
+ *
+ * @param <T> emission type
  */
 public final class Work<T> {
     private static final String TAG = Work.class.getName();

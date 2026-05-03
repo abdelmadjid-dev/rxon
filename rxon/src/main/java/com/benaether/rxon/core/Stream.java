@@ -63,6 +63,8 @@ import io.reactivex.rxjava3.functions.Predicate;
  * </ul>
  *
  * <p>Use {@link Work} for single-shot operations or side-effects.</p>
+ *
+ * @param <T> emission type
  */
 public final class Stream<T> {
 
