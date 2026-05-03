@@ -67,4 +67,30 @@ signing {
 centralPortal {
     username = project.findProperty("ossrhUsername")?.toString()
     password = project.findProperty("ossrhPassword")?.toString()
+
+    publishingType.set(net.thebugmc.gradle.sonatypepublisher.PublishingType.AUTOMATIC)
+
+    pom {
+        name.set("RxOn")
+        description.set("A semantic wrapper over RxJava 3 for Java and Android.")
+        url.set("https://github.com/abdelmadjid-dev/rxon")
+        licenses {
+            license {
+                name.set("The Apache License, Version 2.0")
+                url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+            }
+        }
+        developers {
+            developer {
+                id.set("abdelmadjid-dev")
+                name.set("Abdelmadjid B.")
+                email.set("abdelmadjid.dev@gmail.com")
+            }
+        }
+        scm {
+            connection.set("scm:git:git://github.com/abdelmadjid-dev/rxon.git")
+            developerConnection.set("scm:git:ssh://github.com/abdelmadjid-dev/rxon.git")
+            url.set("https://github.com/abdelmadjid-dev/rxon")
+        }
+    }
 }
