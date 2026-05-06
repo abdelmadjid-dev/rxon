@@ -176,6 +176,34 @@ public final class Stream<T> {
     // ===========================================================================================
 
     /**
+     * Chain another Stream.
+     */
+    public <R> Stream<R> then(ScopedBoundaries.StreamScope<T, R> fn) {
+        return new Stream<>(asFlowable().flatMap(t -> {
+            Stream<R> next = fn.apply(t);
+            if (next == null) {
+                return Flowable.error(new IllegalStateException("then() mapping returned null Stream"));
+            }
+            return next.asFlowable().onErrorResumeNext(this::recoverFinish);
+        }));
+    }
+
+    /**
+     * Chain another Stream on a specific scheduler.
+     */
+    public <R> Stream<R> then(WorkScheduler scheduler, ScopedBoundaries.StreamScope<T, R> fn) {
+        return new Stream<>(asFlowable()
+                .observeOn(SchedulerResolver.resolve(scheduler))
+                .flatMap(t -> {
+                    Stream<R> next = fn.apply(t);
+                    if (next == null) {
+                        return Flowable.error(new IllegalStateException("then() mapping returned null Stream"));
+                    }
+                    return next.asFlowable().onErrorResumeNext(this::recoverFinish);
+                }));
+    }
+
+    /**
      * Chain an asynchronous transformation or another Stream.
      */
     public <R> Stream<R> then(ScopedBoundaries.StreamAsyncScope<T, R> fn) {
@@ -205,9 +233,27 @@ public final class Stream<T> {
                 }));
     }
 
+    /**
+     * Chain a synchronous transformation (Map).
+     */
+    public <R> Stream<R> then(ScopedFunctions.ThrowingFn<T, R> fn) {
+        return thenMap(fn);
+    }
+
+    /**
+     * Chain a synchronous transformation (Map) on a specific scheduler.
+     */
+    public <R> Stream<R> then(WorkScheduler scheduler, ScopedFunctions.ThrowingFn<T, R> fn) {
+        return thenMap(fn, SchedulerResolver.resolve(scheduler));
+    }
+
     // ===========================================================================================
     // PIPELINE DSL — CONDITIONAL
     // ===========================================================================================
+ 
+    private <R> Stream<R> thenMap(Function<T, R> fn) {
+        return new Stream<>(flowable.map(fn));
+    }
 
     /**
      * Continue the stream only if the condition is satisfied.
@@ -248,7 +294,7 @@ public final class Stream<T> {
         return thenMap(fn, SchedulerResolver.resolve(scheduler));
     }
 
-    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases. */
+    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamScope)}. Will be deleted in future releases. */
     @Deprecated
     public <R> Stream<R> onAsync(
             WorkScheduler scheduler,
@@ -263,7 +309,7 @@ public final class Stream<T> {
     // ===========================================================================================
 
     /**
-     * @deprecated Use {@link #then(ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases.
+     * @deprecated Use {@link #then(ScopedBoundaries.StreamScope)}. Will be deleted in future releases.
      * <p>Compose another Stream workflow.</p>
      */
     @Deprecated
@@ -287,7 +333,7 @@ public final class Stream<T> {
         );
     }
 
-    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases. */
+    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamScope)}. Will be deleted in future releases. */
     @Deprecated
     public <R> Stream<R> composeOn(
             WorkScheduler scheduler,
@@ -403,7 +449,7 @@ public final class Stream<T> {
     }
 
     /**
-     * @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases.
+     * @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamScope)}. Will be deleted in future releases.
      * <p>Dynamic branch selection.</p>
      */
     @Deprecated
@@ -411,25 +457,7 @@ public final class Stream<T> {
             WorkScheduler scheduler,
             Function<T, Stream<R>> decision
     ) {
-        Scheduler s = SchedulerResolver.resolve(scheduler);
-
-        return new Stream<>(
-                flowable.observeOn(s)
-                        .flatMap(value -> {
-                            Stream<R> next = decision.apply(value);
-
-                            if (next == null) {
-                                return Flowable.error(
-                                        new IllegalStateException(
-                                                "switchOn() returned null Stream"
-                                        )
-                                );
-                            }
-
-                            return next.asFlowable()
-                                    .onErrorResumeNext(this::recoverFinish);
-                        })
-        );
+        return then(scheduler, decision::apply);
     }
     // ===========================================================================================
     // INTEROP

@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.benaether.rxon.schedulers.WorkScheduler;
+import com.benaether.rxon.scopes.ScopedBoundaries;
 import com.benaether.rxon.scopes.Done;
 
 import org.junit.Before;
@@ -39,8 +40,8 @@ public class WorkTest {
     @Test
     public void testSimplePipeline_EmitsTransformedValue() {
         Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .then(i -> Work.start(WorkScheduler.COMPUTE, () -> i * 2))
-            .then(i -> Work.start(WorkScheduler.COMPUTE, () -> "Result: " + i))
+            .then((ScopedBoundaries.WorkScope<Integer, Integer>) i -> Work.start(WorkScheduler.COMPUTE, () -> i * 2))
+            .then((ScopedBoundaries.WorkScope<Integer, String>) i -> Work.start(WorkScheduler.COMPUTE, () -> "Result: " + i))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -53,8 +54,8 @@ public class WorkTest {
         Exception expectedError = new RuntimeException("Something went wrong");
         
         Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .then(i -> Work.fail(expectedError))
-            .then(i -> Work.start(WorkScheduler.COMPUTE, () -> i + " ignored"))
+            .then((ScopedBoundaries.WorkScope<Integer, Object>) i -> Work.fail(expectedError))
+            .then((ScopedBoundaries.WorkScope<Object, String>) i -> Work.start(WorkScheduler.COMPUTE, () -> i + " ignored"))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -116,7 +117,7 @@ public class WorkTest {
 
         Work.start(WorkScheduler.COMPUTE, () -> 3)
             .thenOnlyIf(i -> i > 5, i -> Work.start(WorkScheduler.COMPUTE, () -> i * 10))
-            .then(i -> Work.start(WorkScheduler.COMPUTE, () -> {
+            .then((ScopedBoundaries.WorkScope<Integer, Integer>) i -> Work.start(WorkScheduler.COMPUTE, () -> {
                 downstreamRan.set(true);
                 return i;
             }))
@@ -170,8 +171,8 @@ public class WorkTest {
     @Test
     public void testFinish_ImmediatelyTerminatesSuccessfully() {
         Work.start(WorkScheduler.COMPUTE, () -> "Start")
-            .then(s -> Work.finish("Early Return"))
-            .then(s -> Work.start(WorkScheduler.COMPUTE, () -> s + " ignored"))
+            .then((ScopedBoundaries.WorkScope<String, String>) s -> Work.finish("Early Return"))
+            .then((ScopedBoundaries.WorkScope<String, String>) s -> Work.start(WorkScheduler.COMPUTE, () -> s + " ignored"))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -183,7 +184,7 @@ public class WorkTest {
         RuntimeException error = new RuntimeException("Fail Fast");
         
         Work.start(WorkScheduler.COMPUTE, () -> "Start")
-            .then(s -> Work.fail(error))
+            .then((ScopedBoundaries.WorkScope<String, String>) s -> Work.fail(error))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)

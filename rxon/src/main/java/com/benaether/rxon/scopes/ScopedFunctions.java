@@ -35,9 +35,9 @@ public class ScopedFunctions {
          * Apply the function.
          * @param t input
          * @return output
-         * @throws Exception if something goes wrong
+         * @throws Throwable if something goes wrong
          */
-        R apply(T t) throws Exception;
+        R apply(T t) throws Throwable;
     }
 
     /**
@@ -49,9 +49,9 @@ public class ScopedFunctions {
         /**
          * Apply the function.
          * @param t input
-         * @throws Exception if something goes wrong
+         * @throws Throwable if something goes wrong
          */
-        void apply(T t) throws Exception;
+        void apply(T t) throws Throwable;
     }
 
 }

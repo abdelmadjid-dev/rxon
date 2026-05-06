@@ -16,7 +16,7 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.benaether:rxon:0.2.0")
+    implementation("com.benaether:rxon:0.2.1")
 }
 ```
 
@@ -27,11 +27,13 @@ For detailed information on version updates and migration instructions, please r
 ### Changelogs
 | Version | Documentation | Description |
 | :--- | :--- | :--- |
+| **v0.2.1** | [Release Notes](changelogs/v0.2.1.md) | Unified `then()` overloads, Throwable support, and specialized functional interfaces. |
 | **v0.2.0** | [Release Notes](changelogs/v0.2.0.md) | Unified semantic DSL, new entry points (`start`), and semantic finish mechanism. |
 
 ### Migration Guides
 | From -> To | Guide | Description |
 | :--- | :--- | :--- |
+| **v0.2.0 -> v0.2.1** | [Migration Guide](migrations/MIGRATION_0.2.0_TO_0.2.1.md) | Moving to unified `then()` overloads and handling lambda ambiguity. |
 | **v0.1.0 -> v0.2.0** | [Migration Guide](migrations/MIGRATION_0.1.0_TO_0.2.0.md) | Step-by-step guide to migrating to the unified semantic pipeline API. |
 
 ## Setup & Initialization

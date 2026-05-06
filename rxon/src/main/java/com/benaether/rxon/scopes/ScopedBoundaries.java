@@ -37,7 +37,7 @@ public class ScopedBoundaries {
     @FunctionalInterface
     public interface AsyncScope<T, R> {
         /** @param t input @return RxJava Single */
-        Single<R> apply(T t);
+        Single<R> apply(T t) throws Throwable;
     }
 
     /**
@@ -47,7 +47,7 @@ public class ScopedBoundaries {
     @FunctionalInterface
     public interface AsyncCompletableScope<T> {
         /** @param t input @return RxJava Completable */
-        Completable apply(T t);
+        Completable apply(T t) throws Throwable;
     }
 
     // =========================
@@ -60,7 +60,7 @@ public class ScopedBoundaries {
      */
     public interface AsyncScope0<R> {
         /** @return RxJava Single */
-        Single<R> apply();
+        Single<R> apply() throws Throwable;
     }
 
     // =========================
@@ -75,7 +75,29 @@ public class ScopedBoundaries {
     @FunctionalInterface
     public interface StreamAsyncScope<T, R> {
         /** @param t input @return Reactive Publisher */
-        Publisher<R> apply(T t);
+        Publisher<R> apply(T t) throws Throwable;
+    }
+
+    /**
+     * Functional interface for a Work scope.
+     * @param <T> input type
+     * @param <R> output type
+     */
+    @FunctionalInterface
+    public interface WorkScope<T, R> {
+        /** @param t input @return Work object @throws Throwable on error */
+        com.benaether.rxon.core.Work<R> apply(T t) throws Throwable;
+    }
+
+    /**
+     * Functional interface for a Stream scope.
+     * @param <T> input type
+     * @param <R> output type
+     */
+    @FunctionalInterface
+    public interface StreamScope<T, R> {
+        /** @param t input @return Stream object @throws Throwable on error */
+        com.benaether.rxon.core.Stream<R> apply(T t) throws Throwable;
     }
 
 }
