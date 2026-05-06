@@ -291,14 +291,14 @@ public final class Work<T> {
     /**
      * Chain another Work.
      */
-    public <R> Work<R> then(ScopedBoundaries.WorkScope<T, R> fn) {
+    public <R> Work<R> chain(ScopedBoundaries.WorkScope<T, R> fn) {
         return new Work<>(asSingle().flatMap(t -> fn.apply(t).asSingle()));
     }
 
     /**
      * Chain another Work on a specific scheduler.
      */
-    public <R> Work<R> then(WorkScheduler scheduler, ScopedBoundaries.WorkScope<T, R> fn) {
+    public <R> Work<R> chain(WorkScheduler scheduler, ScopedBoundaries.WorkScope<T, R> fn) {
         Scheduler s = SchedulerResolver.resolve(scheduler);
 
         return new Work<>(
@@ -309,7 +309,7 @@ public final class Work<T> {
                             if (next == null) {
                                 return Single.error(
                                         new IllegalStateException(
-                                                "then() mapping returned null Work"
+                                                "chain() mapping returned null Work"
                                         )
                                 );
                             }
@@ -317,6 +317,34 @@ public final class Work<T> {
                             return next.asSingle();
                         })
         );
+    }
+
+    /**
+     * Chain an asynchronous transformation (Single flatMap).
+     */
+    public <R> Work<R> chainSingle(ScopedBoundaries.AsyncScope<T, R> fn) {
+        return chainFlatMap(fn::apply);
+    }
+
+    /**
+     * Chain an asynchronous transformation (Single flatMap) on a specific scheduler.
+     */
+    public <R> Work<R> chainSingle(WorkScheduler scheduler, ScopedBoundaries.AsyncScope<T, R> fn) {
+        return chainFlatMap(fn::apply, SchedulerResolver.resolve(scheduler));
+    }
+
+    /**
+     * Chain an asynchronous Completable.
+     */
+    public Work<Done> chainCompletable(ScopedBoundaries.AsyncCompletableScope<T> fn) {
+        return chainFlatMap(t -> fn.apply(t).toSingleDefault(Done.INSTANCE));
+    }
+
+    /**
+     * Chain an asynchronous Completable on a specific scheduler.
+     */
+    public Work<Done> chainCompletable(WorkScheduler scheduler, ScopedBoundaries.AsyncCompletableScope<T> fn) {
+        return chainFlatMap(t -> fn.apply(t).toSingleDefault(Done.INSTANCE), SchedulerResolver.resolve(scheduler));
     }
 
     /**
@@ -331,34 +359,6 @@ public final class Work<T> {
      */
     public <R> Work<R> then(WorkScheduler scheduler, ScopedFunctions.ThrowingFn<T, R> fn) {
         return thenMap(fn, SchedulerResolver.resolve(scheduler));
-    }
-
-    /**
-     * Chain an asynchronous transformation (Single flatMap).
-     */
-    public <R> Work<R> then(ScopedBoundaries.AsyncScope<T, R> fn) {
-        return thenFlatMap(fn::apply);
-    }
-
-    /**
-     * Chain an asynchronous transformation (Single flatMap) on a specific scheduler.
-     */
-    public <R> Work<R> then(WorkScheduler scheduler, ScopedBoundaries.AsyncScope<T, R> fn) {
-        return thenFlatMap(fn::apply, SchedulerResolver.resolve(scheduler));
-    }
-
-    /**
-     * Chain an asynchronous Completable.
-     */
-    public Work<Done> then(ScopedBoundaries.AsyncCompletableScope<T> fn) {
-        return thenFlatMap(t -> fn.apply(t).toSingleDefault(Done.INSTANCE));
-    }
-
-    /**
-     * Chain an asynchronous Completable on a specific scheduler.
-     */
-    public Work<Done> then(WorkScheduler scheduler, ScopedBoundaries.AsyncCompletableScope<T> fn) {
-        return thenFlatMap(t -> fn.apply(t).toSingleDefault(Done.INSTANCE), SchedulerResolver.resolve(scheduler));
     }
 
     // ===========================================================================================
@@ -383,20 +383,20 @@ public final class Work<T> {
     // CHAINING — ASYNC
     // ===========================================================================================
 
-    private <R> Work<R> thenFlatMap(Function<T, Single<R>> fn) {
+    private <R> Work<R> chainFlatMap(Function<T, Single<R>> fn) {
         return new Work<>(single.flatMap(t -> mapErrors(fn.apply(t))));
     }
 
-    private <R> Work<R> thenFlatMap(Function<T, Single<R>> fn, Scheduler scheduler) {
+    private <R> Work<R> chainFlatMap(Function<T, Single<R>> fn, Scheduler scheduler) {
         return new Work<>(single.observeOn(scheduler)
                 .flatMap(t -> mapErrors(fn.apply(t))));
     }
 
-    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.AsyncScope)}. Will be deleted in future releases. */
+    /** @deprecated Use {@link #chainSingle(WorkScheduler, ScopedBoundaries.AsyncScope)}. Will be deleted in future releases. */
     @Deprecated
     public <R> Work<R> onAsync(WorkScheduler workScheduler,
                                ScopedBoundaries.AsyncScope<T, R> fn) {
-        return thenFlatMap(fn::apply, SchedulerResolver.resolve(workScheduler));
+        return chainSingle(workScheduler, fn);
     }
 
 
@@ -417,24 +417,18 @@ public final class Work<T> {
     // CHAINING — UNIT (ASYNC SIDE EFFECTS)
     // ===========================================================================================
 
-    /** @deprecated Use semantic operators. Will be deleted in future releases. */
+    /** @deprecated Use {@link #chainSingle(WorkScheduler, ScopedBoundaries.AsyncScope)}. Will be deleted in future releases. */
     @Deprecated
     public Work<Done> onAsyncUnit(WorkScheduler workScheduler, ScopedBoundaries.AsyncScope<T,
             ?> fn) {
-        return thenFlatMap(t ->
-                        fn.apply(t).map(ignored -> Done.INSTANCE),
-                SchedulerResolver.resolve(workScheduler)
-        );
+        return chainSingle(workScheduler, t -> fn.apply(t).map(ignored -> Done.INSTANCE));
     }
 
-    /** @deprecated Use semantic operators. Will be deleted in future releases. */
+    /** @deprecated Use {@link #chainCompletable(WorkScheduler, ScopedBoundaries.AsyncCompletableScope)}. Will be deleted in future releases. */
     @Deprecated
     public Work<Done> onAsyncCompletable(WorkScheduler workScheduler,
                                          ScopedBoundaries.AsyncCompletableScope<T> fn) {
-        return thenFlatMap(t ->
-                        fn.apply(t).toSingleDefault(Done.INSTANCE),
-                SchedulerResolver.resolve(workScheduler)
-        );
+        return chainCompletable(workScheduler, fn);
     }
 
     // ===========================================================================================
@@ -442,42 +436,36 @@ public final class Work<T> {
     // ===========================================================================================
 
     /**
-     * @deprecated Use {@link #then(ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
+     * @deprecated Use {@link #chain(ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
      * <p>Composition with no extra logic.</p>
      */
     @Deprecated
     public <R> Work<R> compose(ScopedWorkflows.Workflow<T, R> wf) {
-        return new Work<>(single
-                .flatMap(t -> wf.apply(t).asSingle()));
+        return chain((ScopedBoundaries.WorkScope<T, R>) wf::apply);
     }
 
     /**
-     * @deprecated Use {@link #then(ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
+     * @deprecated Use {@link #chain(ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
      * <p>Composition with no extra logic.</p>
      */
     @Deprecated
     public <R> Work<R> compose(ScopedWorkflows.Workflow0<R> wf) {
-        return new Work<>(single
-                .flatMap(ignored -> wf.apply().asSingle()));
+        return chain((ScopedBoundaries.WorkScope<T, R>) ignored -> wf.apply());
     }
 
     /**
-     * @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
+     * @deprecated Use {@link #chain(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
      * <p>Compose another Workflow.</p>
      */
     @Deprecated
     public <R> Work<R> composeOn(WorkScheduler workScheduler, ScopedWorkflows.Workflow<T, R> wf) {
-        return new Work<>(single
-                .observeOn(SchedulerResolver.resolve(workScheduler))
-                .flatMap(t -> wf.apply(t).asSingle()));
+        return chain(workScheduler, (ScopedBoundaries.WorkScope<T, R>) wf::apply);
     }
 
-    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases. */
+    /** @deprecated Use {@link #chain(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases. */
     @Deprecated
     public <R> Work<R> composeOn(WorkScheduler workScheduler, ScopedWorkflows.Workflow0<R> wf) {
-        return new Work<>(single
-                .observeOn(SchedulerResolver.resolve(workScheduler))
-                .flatMap(ignored -> wf.apply().asSingle()));
+        return chain(workScheduler, (ScopedBoundaries.WorkScope<T, R>) ignored -> wf.apply());
     }
 
     // ===========================================================================================
@@ -613,13 +601,13 @@ public final class Work<T> {
     // BRANCHING — CONTROL FLOW
     // ===========================================================================================
 
-    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases. */
+    /** @deprecated Use {@link #chain(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases. */
     @Deprecated
     public <R> Work<R> switchOn(
             WorkScheduler scheduler,
             Function<T, Work<R>> decision
     ) {
-        return then(scheduler, decision::apply);
+        return chain(scheduler, decision::apply);
     }
 
     /** @deprecated Use {@link #finish(Object)}. Will be deleted in future releases. */
@@ -710,12 +698,12 @@ public final class Work<T> {
      * @param sideEffect Work to execute if condition is true
      * @return Work that emits the original value
      */
-    public Work<T> thenIf(Predicate<T> condition, Function<T, Work<?>> sideEffect) {
+    public Work<T> chainIf(Predicate<T> condition, Function<T, Work<?>> sideEffect) {
         return new Work<>(asSingle().flatMap(value -> {
             if (condition.test(value)) {
                 Work<?> next = sideEffect.apply(value);
                 if (next == null) {
-                    return Single.error(new IllegalStateException("thenIf() sideEffect returned null"));
+                    return Single.error(new IllegalStateException("chainIf() sideEffect returned null"));
                 }
                 return next.asSingle().map(ignored -> value);
             }
@@ -732,12 +720,12 @@ public final class Work<T> {
      * @param <R>       resulting type (must be compatible with T in halt case)
      * @return Work representing the continuation or halt
      */
-    public <R> Work<R> thenOnlyIf(Predicate<T> condition, Function<T, Work<R>> mapping) {
+    public <R> Work<R> chainOnlyIf(Predicate<T> condition, Function<T, Work<R>> mapping) {
         return new Work<>(asSingle().flatMap(value -> {
             if (condition.test(value)) {
                 Work<R> next = mapping.apply(value);
                 if (next == null) {
-                    return Single.error(new IllegalStateException("thenOnlyIf() mapping returned null"));
+                    return Single.error(new IllegalStateException("chainOnlyIf() mapping returned null"));
                 }
                 return next.asSingle();
             }

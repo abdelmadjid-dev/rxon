@@ -5,7 +5,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.benaether.rxon.schedulers.WorkScheduler;
-import com.benaether.rxon.scopes.ScopedBoundaries;
 import com.benaether.rxon.scopes.Done;
 
 import org.junit.Before;
@@ -40,8 +39,8 @@ public class WorkTest {
     @Test
     public void testSimplePipeline_EmitsTransformedValue() {
         Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .then((ScopedBoundaries.WorkScope<Integer, Integer>) i -> Work.start(WorkScheduler.COMPUTE, () -> i * 2))
-            .then((ScopedBoundaries.WorkScope<Integer, String>) i -> Work.start(WorkScheduler.COMPUTE, () -> "Result: " + i))
+            .then(i -> i * 2)
+            .then(i -> "Result: " + i)
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -50,12 +49,49 @@ public class WorkTest {
     }
 
     @Test
+    public void testPipelineWithWorkChaining() {
+        Work.start(WorkScheduler.COMPUTE, () -> 10)
+            .chain(i -> Work.start(WorkScheduler.COMPUTE, () -> i * 2))
+            .chain(i -> Work.start(WorkScheduler.COMPUTE, () -> "Result: " + i))
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue("Result: 20")
+            .assertComplete();
+    }
+
+    @Test
+    public void testPipelineWithSingleChaining() {
+        Work.start(WorkScheduler.COMPUTE, () -> 10)
+            .chainSingle(i -> Single.just(i * 2))
+            .chainSingle(i -> Single.just("Result: " + i))
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue("Result: 20")
+            .assertComplete();
+    }
+
+    @Test
+    public void testPipelineWithCompletableChaining() {
+        AtomicBoolean completed = new AtomicBoolean(false);
+        Work.start(WorkScheduler.COMPUTE, () -> 10)
+            .chainCompletable(i -> Completable.fromAction(() -> completed.set(true)))
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue(Done.INSTANCE);
+            
+        assertTrue("Completable should have executed", completed.get());
+    }
+
+    @Test
     public void testPipelineFailure_PropagatesError() {
         Exception expectedError = new RuntimeException("Something went wrong");
         
         Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .then((ScopedBoundaries.WorkScope<Integer, Object>) i -> Work.fail(expectedError))
-            .then((ScopedBoundaries.WorkScope<Object, String>) i -> Work.start(WorkScheduler.COMPUTE, () -> i + " ignored"))
+            .chain(i -> Work.fail(expectedError))
+            .then(i -> i + " ignored")
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -68,11 +104,11 @@ public class WorkTest {
     // ===========================================================================================
 
     @Test
-    public void testThenIf_WhenConditionTrue_ExecutesSideEffectAndPreservesValue() {
+    public void testChainIf_WhenConditionTrue_ExecutesSideEffectAndPreservesValue() {
         AtomicBoolean sideEffectRan = new AtomicBoolean(false);
         
         Work.start(WorkScheduler.COMPUTE, () -> "Input")
-            .thenIf(s -> s.equals("Input"), s -> Work.start(WorkScheduler.COMPUTE, () -> {
+            .chainIf(s -> s.equals("Input"), s -> Work.start(WorkScheduler.COMPUTE, () -> {
                 sideEffectRan.set(true);
                 return Done.INSTANCE;
             }))
@@ -85,11 +121,11 @@ public class WorkTest {
     }
 
     @Test
-    public void testThenIf_WhenConditionFalse_SkipsSideEffectAndPreservesValue() {
+    public void testChainIf_WhenConditionFalse_SkipsSideEffectAndPreservesValue() {
         AtomicBoolean sideEffectRan = new AtomicBoolean(false);
         
         Work.start(WorkScheduler.COMPUTE, () -> "Input")
-            .thenIf(s -> s.equals("Other"), s -> Work.start(WorkScheduler.COMPUTE, () -> {
+            .chainIf(s -> s.equals("Other"), s -> Work.start(WorkScheduler.COMPUTE, () -> {
                 sideEffectRan.set(true);
                 return Done.INSTANCE;
             }))
@@ -102,9 +138,9 @@ public class WorkTest {
     }
 
     @Test
-    public void testThenOnlyIf_WhenConditionTrue_ContinuesWithMapping() {
+    public void testChainOnlyIf_WhenConditionTrue_ContinuesWithMapping() {
         Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .thenOnlyIf(i -> i > 5, i -> Work.start(WorkScheduler.COMPUTE, () -> i * 10))
+            .chainOnlyIf(i -> i > 5, i -> Work.start(WorkScheduler.COMPUTE, () -> i * 10))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -112,15 +148,15 @@ public class WorkTest {
     }
 
     @Test
-    public void testThenOnlyIf_WhenConditionFalse_FinishesWithCurrentValue() {
+    public void testChainOnlyIf_WhenConditionFalse_FinishesWithCurrentValue() {
         AtomicBoolean downstreamRan = new AtomicBoolean(false);
 
         Work.start(WorkScheduler.COMPUTE, () -> 3)
-            .thenOnlyIf(i -> i > 5, i -> Work.start(WorkScheduler.COMPUTE, () -> i * 10))
-            .then((ScopedBoundaries.WorkScope<Integer, Integer>) i -> Work.start(WorkScheduler.COMPUTE, () -> {
+            .chainOnlyIf(i -> i > 5, i -> Work.start(WorkScheduler.COMPUTE, () -> i * 10))
+            .then(i -> {
                 downstreamRan.set(true);
                 return i;
-            }))
+            })
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -171,8 +207,8 @@ public class WorkTest {
     @Test
     public void testFinish_ImmediatelyTerminatesSuccessfully() {
         Work.start(WorkScheduler.COMPUTE, () -> "Start")
-            .then((ScopedBoundaries.WorkScope<String, String>) s -> Work.finish("Early Return"))
-            .then((ScopedBoundaries.WorkScope<String, String>) s -> Work.start(WorkScheduler.COMPUTE, () -> s + " ignored"))
+            .chain(s -> Work.finish("Early Return"))
+            .then(s -> s + " ignored")
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -184,7 +220,7 @@ public class WorkTest {
         RuntimeException error = new RuntimeException("Fail Fast");
         
         Work.start(WorkScheduler.COMPUTE, () -> "Start")
-            .then((ScopedBoundaries.WorkScope<String, String>) s -> Work.fail(error))
+            .chain(s -> Work.fail(error))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)

@@ -16,7 +16,7 @@ Add the dependency to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.benaether:rxon:0.2.1")
+    implementation("com.benaether:rxon:0.2.2")
 }
 ```
 
@@ -27,12 +27,14 @@ For detailed information on version updates and migration instructions, please r
 ### Changelogs
 | Version | Documentation | Description |
 | :--- | :--- | :--- |
+| **v0.2.2** | [Release Notes](changelogs/v0.2.2.md) | Split `then()` into `then()` (sync) and `chain()` (async) to resolve ambiguity. |
 | **v0.2.1** | [Release Notes](changelogs/v0.2.1.md) | Unified `then()` overloads, Throwable support, and specialized functional interfaces. |
 | **v0.2.0** | [Release Notes](changelogs/v0.2.0.md) | Unified semantic DSL, new entry points (`start`), and semantic finish mechanism. |
 
 ### Migration Guides
 | From -> To | Guide | Description |
 | :--- | :--- | :--- |
+| **v0.2.1 -> v0.2.2** | [Migration Guide](migrations/MIGRATION_0.2.1_TO_0.2.2.md) | Moving to the split `then`/`chain` API. |
 | **v0.2.0 -> v0.2.1** | [Migration Guide](migrations/MIGRATION_0.2.0_TO_0.2.1.md) | Moving to unified `then()` overloads and handling lambda ambiguity. |
 | **v0.1.0 -> v0.2.0** | [Migration Guide](migrations/MIGRATION_0.1.0_TO_0.2.0.md) | Step-by-step guide to migrating to the unified semantic pipeline API. |
 
@@ -73,7 +75,8 @@ RxOnConfig.builder()
 
 ```java
 Work.start(WorkScheduler.IO, () -> repository.getUser(id))
-    .then(WorkScheduler.COMPUTE, user -> transform(user))
+    .then(user -> transform(user))
+    .chain(user -> repository.save(user))
     .executeOn(WorkScheduler.MAIN, 
         result -> ui.show(result),
         error -> ui.error(error)
@@ -94,7 +97,7 @@ Stream.start(WorkScheduler.IO, database.observeItems())
 
 ### Controlled Branching
 ```java
-work.then(WorkScheduler.COMPUTE, data -> {
+work.chain(data -> {
     if (data.isExpired()) return Work.fail(new ExpiredException());
     if (data.isCached()) return Work.finish(data);
     return fetchRemote(data);

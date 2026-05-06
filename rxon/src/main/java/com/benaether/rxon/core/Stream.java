@@ -178,11 +178,11 @@ public final class Stream<T> {
     /**
      * Chain another Stream.
      */
-    public <R> Stream<R> then(ScopedBoundaries.StreamScope<T, R> fn) {
+    public <R> Stream<R> chain(ScopedBoundaries.StreamScope<T, R> fn) {
         return new Stream<>(asFlowable().flatMap(t -> {
             Stream<R> next = fn.apply(t);
             if (next == null) {
-                return Flowable.error(new IllegalStateException("then() mapping returned null Stream"));
+                return Flowable.error(new IllegalStateException("chain() mapping returned null Stream"));
             }
             return next.asFlowable().onErrorResumeNext(this::recoverFinish);
         }));
@@ -191,13 +191,13 @@ public final class Stream<T> {
     /**
      * Chain another Stream on a specific scheduler.
      */
-    public <R> Stream<R> then(WorkScheduler scheduler, ScopedBoundaries.StreamScope<T, R> fn) {
+    public <R> Stream<R> chain(WorkScheduler scheduler, ScopedBoundaries.StreamScope<T, R> fn) {
         return new Stream<>(asFlowable()
                 .observeOn(SchedulerResolver.resolve(scheduler))
                 .flatMap(t -> {
                     Stream<R> next = fn.apply(t);
                     if (next == null) {
-                        return Flowable.error(new IllegalStateException("then() mapping returned null Stream"));
+                        return Flowable.error(new IllegalStateException("chain() mapping returned null Stream"));
                     }
                     return next.asFlowable().onErrorResumeNext(this::recoverFinish);
                 }));
@@ -206,11 +206,11 @@ public final class Stream<T> {
     /**
      * Chain an asynchronous transformation or another Stream.
      */
-    public <R> Stream<R> then(ScopedBoundaries.StreamAsyncScope<T, R> fn) {
+    public <R> Stream<R> chainPublisher(ScopedBoundaries.StreamAsyncScope<T, R> fn) {
         return new Stream<>(asFlowable().flatMap(t -> {
             org.reactivestreams.Publisher<R> publisher = fn.apply(t);
             if (publisher == null) {
-                return Flowable.error(new IllegalStateException("then() returned null Publisher"));
+                return Flowable.error(new IllegalStateException("chainPublisher() returned null Publisher"));
             }
             return Flowable.fromPublisher(publisher)
                     .onErrorResumeNext(this::recoverFinish);
@@ -220,13 +220,13 @@ public final class Stream<T> {
     /**
      * Chain an asynchronous transformation or another Stream on a specific scheduler.
      */
-    public <R> Stream<R> then(WorkScheduler scheduler, ScopedBoundaries.StreamAsyncScope<T, R> fn) {
+    public <R> Stream<R> chainPublisher(WorkScheduler scheduler, ScopedBoundaries.StreamAsyncScope<T, R> fn) {
         return new Stream<>(asFlowable()
                 .observeOn(SchedulerResolver.resolve(scheduler))
                 .flatMap(t -> {
                     org.reactivestreams.Publisher<R> publisher = fn.apply(t);
                     if (publisher == null) {
-                        return Flowable.error(new IllegalStateException("then() returned null Publisher"));
+                        return Flowable.error(new IllegalStateException("chainPublisher() returned null Publisher"));
                     }
                     return Flowable.fromPublisher(publisher)
                             .onErrorResumeNext(this::recoverFinish);
@@ -259,12 +259,12 @@ public final class Stream<T> {
      * Continue the stream only if the condition is satisfied.
      * Otherwise finishes the entire stream early with the current value.
      */
-    public <R> Stream<R> thenOnlyIf(Predicate<T> condition, Function<T, Stream<R>> mapping) {
+    public <R> Stream<R> chainOnlyIf(Predicate<T> condition, Function<T, Stream<R>> mapping) {
         return new Stream<>(asFlowable().flatMap(value -> {
             if (condition.test(value)) {
                 Stream<R> next = mapping.apply(value);
                 if (next == null) {
-                    return Flowable.error(new IllegalStateException("thenOnlyIf() mapping returned null Stream"));
+                    return Flowable.error(new IllegalStateException("chainOnlyIf() mapping returned null Stream"));
                 }
                 return next.asFlowable().onErrorResumeNext(this::recoverFinish);
             }
@@ -294,13 +294,13 @@ public final class Stream<T> {
         return thenMap(fn, SchedulerResolver.resolve(scheduler));
     }
 
-    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamScope)}. Will be deleted in future releases. */
+    /** @deprecated Use {@link #chainPublisher(WorkScheduler, ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases. */
     @Deprecated
     public <R> Stream<R> onAsync(
             WorkScheduler scheduler,
             ScopedBoundaries.StreamAsyncScope<T, R> fn
     ) {
-        return then(scheduler, fn);
+        return chainPublisher(scheduler, fn);
     }
 
 
@@ -309,54 +309,23 @@ public final class Stream<T> {
     // ===========================================================================================
 
     /**
-     * @deprecated Use {@link #then(ScopedBoundaries.StreamScope)}. Will be deleted in future releases.
+     * @deprecated Use {@link #chain(ScopedBoundaries.StreamScope)}. Will be deleted in future releases.
      * <p>Compose another Stream workflow.</p>
      */
     @Deprecated
     public <R> Stream<R> compose(
             ScopedWorkflows.StreamWorkflow<T, R> wf
     ) {
-        return new Stream<>(
-                flowable.flatMap(value -> {
-                    Stream<R> next = wf.apply(value);
-
-                    if (next == null) {
-                        return Flowable.error(
-                                new IllegalStateException(
-                                        "compose() workflow returned null Stream"
-                                )
-                        );
-                    }
-
-                    return next.asFlowable();
-                })
-        );
+        return chain((ScopedBoundaries.StreamScope<T, R>) wf::apply);
     }
 
-    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamScope)}. Will be deleted in future releases. */
+    /** @deprecated Use {@link #chain(WorkScheduler, ScopedBoundaries.StreamScope)}. Will be deleted in future releases. */
     @Deprecated
     public <R> Stream<R> composeOn(
             WorkScheduler scheduler,
             ScopedWorkflows.StreamWorkflow<T, R> wf
     ) {
-        Scheduler s = SchedulerResolver.resolve(scheduler);
-
-        return new Stream<>(
-                flowable.observeOn(s)
-                        .flatMap(value -> {
-                            Stream<R> next = wf.apply(value);
-
-                            if (next == null) {
-                                return Flowable.error(
-                                        new IllegalStateException(
-                                                "composeOn() workflow returned null Stream"
-                                        )
-                                );
-                            }
-
-                            return next.asFlowable();
-                        })
-        );
+        return chain(scheduler, (ScopedBoundaries.StreamScope<T, R>) wf::apply);
     }
 
     // ===========================================================================================
@@ -449,7 +418,7 @@ public final class Stream<T> {
     }
 
     /**
-     * @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamScope)}. Will be deleted in future releases.
+     * @deprecated Use {@link #chain(WorkScheduler, ScopedBoundaries.StreamScope)}. Will be deleted in future releases.
      * <p>Dynamic branch selection.</p>
      */
     @Deprecated
@@ -457,7 +426,7 @@ public final class Stream<T> {
             WorkScheduler scheduler,
             Function<T, Stream<R>> decision
     ) {
-        return then(scheduler, decision::apply);
+        return chain(scheduler, decision::apply);
     }
     // ===========================================================================================
     // INTEROP

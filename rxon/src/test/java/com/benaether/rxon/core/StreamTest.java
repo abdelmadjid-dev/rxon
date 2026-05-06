@@ -1,7 +1,6 @@
 package com.benaether.rxon.core;
 
 import com.benaether.rxon.schedulers.WorkScheduler;
-import com.benaether.rxon.scopes.ScopedBoundaries;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -27,7 +26,7 @@ public class StreamTest {
     @Test
     public void testSimpleStreamPipeline_EmitsTransformedValues() {
         Stream.start(WorkScheduler.COMPUTE, Flowable.just(1, 2, 3))
-            .then((ScopedBoundaries.StreamAsyncScope<Integer, Integer>) i -> Flowable.just(i * 10))
+            .chainPublisher(i -> Flowable.just(i * 10))
             .asTerminalFlowable()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -38,7 +37,7 @@ public class StreamTest {
     @Test
     public void testStreamToWorkPipeline_EmitsResults() {
         Stream.start(WorkScheduler.COMPUTE, Flowable.just("a", "b"))
-            .then((ScopedBoundaries.StreamAsyncScope<String, String>) s -> Work.start(WorkScheduler.COMPUTE, () -> s.toUpperCase()).asSingle().toFlowable())
+            .chainPublisher(s -> Work.start(WorkScheduler.COMPUTE, () -> s.toUpperCase()).asSingle().toFlowable())
             .asTerminalFlowable()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -51,7 +50,7 @@ public class StreamTest {
         // This test verifies that if a Work step finishes early, the Stream still recovers the value
         // and continues to the next emission.
         Stream.start(WorkScheduler.COMPUTE, Flowable.just(1, 2, 3))
-            .then((ScopedBoundaries.StreamAsyncScope<Integer, Integer>) i -> {
+            .chainPublisher(i -> {
                 if (i == 2) return Work.finish(20).asSingle().toFlowable();
                 return Work.start(WorkScheduler.COMPUTE, () -> i * 10).asSingle().toFlowable();
             })
@@ -65,7 +64,7 @@ public class StreamTest {
     @Test
     public void testThenOnlyIf_WhenConditionFalse_FinishesEntireStream() {
         Stream.start(WorkScheduler.COMPUTE, Flowable.just(1, 2, 3))
-            .thenOnlyIf(i -> i < 2, i -> Stream.start(WorkScheduler.COMPUTE, Flowable.just(i * 10)))
+            .chainOnlyIf(i -> i < 2, i -> Stream.start(WorkScheduler.COMPUTE, Flowable.just(i * 10)))
             .asTerminalFlowable()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
