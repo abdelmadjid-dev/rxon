@@ -18,12 +18,10 @@ package com.benaether.rxon.core;
 
 import com.benaether.rxon.rx.RxLog;
 import com.benaether.rxon.schedulers.WorkScheduler;
+import com.benaether.rxon.scopes.Done;
 import com.benaether.rxon.scopes.ScopedBoundaries;
 import com.benaether.rxon.scopes.ScopedFunctions;
 import com.benaether.rxon.scopes.ScopedWorkflows;
-import com.benaether.rxon.scopes.Unit;
-
-import org.reactivestreams.Publisher;
 
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Scheduler;
@@ -44,7 +42,7 @@ import io.reactivex.rxjava3.functions.Predicate;
  * <ul>
  *   <li><b>Multiple emissions</b>: backed by {@link Flowable}</li>
  *   <li><b>No null values</b>: emitting {@code null} will crash</li>
- *   <li><b>No {@link Unit}</b>: side-effects belong in {@link Work}</li>
+ *   <li>No {@link Done}: side-effects belong in {@link Work}</li>
  *   <li><b>Explicit threading</b>: execution always uses {@link WorkScheduler}</li>
  *   <li><b>Semantic composition</b>: workflows encapsulate their own execution</li>
  * </ul>
@@ -70,7 +68,7 @@ public final class Stream<T> {
 
     private static final String TAG = Stream.class.getName();
 
-    final Flowable<T> flowable;
+    private final Flowable<T> flowable;
 
     Stream(Flowable<T> flowable) {
         this.flowable = flowable;
@@ -90,14 +88,70 @@ public final class Stream<T> {
     }
 
     // ===========================================================================================
-    // ENTRY POINTS — ASYNC SOURCES
+    // PIPELINE DSL — ENTRY POINTS
     // ===========================================================================================
 
+    /**
+     * Start a new Stream pipeline from an asynchronous source.
+     */
+    public static <T> Stream<T> start(WorkScheduler scheduler, Flowable<T> source) {
+        return fromFlowable(source, SchedulerResolver.resolve(scheduler));
+    }
+
+    /**
+     * Start a new Stream pipeline from a Single.
+     */
+    public static <T> Stream<T> start(WorkScheduler scheduler, io.reactivex.rxjava3.core.Single<T> source) {
+        return start(scheduler, source.toFlowable());
+    }
+
+    /**
+     * Start a new Stream pipeline from a Completable.
+     */
+    public static Stream<Done> start(WorkScheduler scheduler, io.reactivex.rxjava3.core.Completable source) {
+        return start(scheduler, source.toFlowable());
+    }
+
+    // ===========================================================================================
+    // PIPELINE DSL — TERMINATION
+    // ===========================================================================================
+
+    /** @deprecated Use {@link #finish(Object)}. Will be deleted in future releases. */
+    @Deprecated
+    public static <T> Stream<T> halt(T value) {
+        return finish(value);
+    }
+
+    /**
+     * Immediately terminate the stream successfully with a value.
+     */
+    public static <T> Stream<T> finish(T value) {
+        if (value == null) {
+            return new Stream<>(Flowable.error(
+                    new NullPointerException("finish() value cannot be null")
+            ));
+        }
+        return new Stream<>(Flowable.error(new Work.PipelineFinishException(value)));
+    }
+
+    /**
+     * Immediately terminate the stream with an error.
+     */
+    public static <T> Stream<T> fail(Throwable throwable) {
+        return new Stream<>(Flowable.error(throwable));
+    }
+
+    // ===========================================================================================
+    // ENTRY POINTS — LEGACY
+    // ===========================================================================================
+
+    /** @deprecated Use {@link #start(WorkScheduler, Flowable)}. Will be deleted in future releases. */
+    @Deprecated
     public static <T> Stream<T> onAsync(
             WorkScheduler scheduler,
             Flowable<T> source
     ) {
-        return fromFlowable(source, SchedulerResolver.resolve(scheduler));
+        return start(scheduler, source);
     }
 
     // ===========================================================================================
@@ -118,7 +172,62 @@ public final class Stream<T> {
     }
 
     // ===========================================================================================
-    // CHAINING — SYNC
+    // PIPELINE DSL — CHAINING
+    // ===========================================================================================
+
+    /**
+     * Chain an asynchronous transformation or another Stream.
+     */
+    public <R> Stream<R> then(ScopedBoundaries.StreamAsyncScope<T, R> fn) {
+        return new Stream<>(asFlowable().flatMap(t -> {
+            org.reactivestreams.Publisher<R> publisher = fn.apply(t);
+            if (publisher == null) {
+                return Flowable.error(new IllegalStateException("then() returned null Publisher"));
+            }
+            return Flowable.fromPublisher(publisher)
+                    .onErrorResumeNext(this::recoverFinish);
+        }));
+    }
+
+    /**
+     * Chain an asynchronous transformation or another Stream on a specific scheduler.
+     */
+    public <R> Stream<R> then(WorkScheduler scheduler, ScopedBoundaries.StreamAsyncScope<T, R> fn) {
+        return new Stream<>(asFlowable()
+                .observeOn(SchedulerResolver.resolve(scheduler))
+                .flatMap(t -> {
+                    org.reactivestreams.Publisher<R> publisher = fn.apply(t);
+                    if (publisher == null) {
+                        return Flowable.error(new IllegalStateException("then() returned null Publisher"));
+                    }
+                    return Flowable.fromPublisher(publisher)
+                            .onErrorResumeNext(this::recoverFinish);
+                }));
+    }
+
+    // ===========================================================================================
+    // PIPELINE DSL — CONDITIONAL
+    // ===========================================================================================
+
+    /**
+     * Continue the stream only if the condition is satisfied.
+     * Otherwise finishes the entire stream early with the current value.
+     */
+    public <R> Stream<R> thenOnlyIf(Predicate<T> condition, Function<T, Stream<R>> mapping) {
+        return new Stream<>(asFlowable().flatMap(value -> {
+            if (condition.test(value)) {
+                Stream<R> next = mapping.apply(value);
+                if (next == null) {
+                    return Flowable.error(new IllegalStateException("thenOnlyIf() mapping returned null Stream"));
+                }
+                return next.asFlowable().onErrorResumeNext(this::recoverFinish);
+            }
+            return Flowable.error(new Work.PipelineFinishException(value));
+        }));
+    }
+
+    // ===========================================================================================
+    // CHAINING — LEGACY
     // ===========================================================================================
 
     private <R> Stream<R> thenMap(
@@ -130,6 +239,8 @@ public final class Stream<T> {
         );
     }
 
+    /** @deprecated Use semantic operators. Will be deleted in future releases. */
+    @Deprecated
     public <R> Stream<R> on(
             WorkScheduler scheduler,
             ScopedFunctions.ThrowingFn<T, R> fn
@@ -137,37 +248,13 @@ public final class Stream<T> {
         return thenMap(fn, SchedulerResolver.resolve(scheduler));
     }
 
-    // ===========================================================================================
-    // CHAINING — ASYNC
-    // ===========================================================================================
-
-    private <R> Stream<R> thenFlatMap(
-            Function<T, Publisher<R>> fn,
-            Scheduler scheduler
-    ) {
-        return new Stream<>(
-                flowable.observeOn(scheduler)
-                        .flatMap(t -> {
-                            Publisher<R> publisher = fn.apply(t);
-
-                            if (publisher == null) {
-                                return Flowable.error(
-                                        new IllegalStateException(
-                                                "onAsync() returned null Publisher"
-                                        )
-                                );
-                            }
-
-                            return mapErrors(Flowable.fromPublisher(publisher));
-                        })
-        );
-    }
-
+    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases. */
+    @Deprecated
     public <R> Stream<R> onAsync(
             WorkScheduler scheduler,
             ScopedBoundaries.StreamAsyncScope<T, R> fn
     ) {
-        return thenFlatMap(fn::apply, SchedulerResolver.resolve(scheduler));
+        return then(scheduler, fn);
     }
 
 
@@ -176,22 +263,10 @@ public final class Stream<T> {
     // ===========================================================================================
 
     /**
-     * Compose another Stream workflow without introducing a new scheduling boundary.
-     *
-     * <p>The current emission is passed directly to the provided workflow.</p>
-     *
-     * <p>No additional {@link WorkScheduler} is applied at this boundary.
-     * The composed workflow controls its own execution context.</p>
-     *
-     * <p>This should be used when you want semantic composition only,
-     * without altering threading behavior.</p>
-     *
-     * @param wf workflow to compose
-     * @param <R> resulting stream type
-     * @return composed Stream
-     *
-     * @throws IllegalStateException if the workflow returns null
+     * @deprecated Use {@link #then(ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases.
+     * <p>Compose another Stream workflow.</p>
      */
+    @Deprecated
     public <R> Stream<R> compose(
             ScopedWorkflows.StreamWorkflow<T, R> wf
     ) {
@@ -207,16 +282,13 @@ public final class Stream<T> {
                         );
                     }
 
-                    return next.flowable;
+                    return next.asFlowable();
                 })
         );
     }
 
-    /**
-     * <p>Compose another Stream workflow.</p>
-     * <p>The workflow controls its own internal execution.</p>
-     * <p>The composition boundary executes on the provided scheduler.</p>
-     */
+    /** @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases. */
+    @Deprecated
     public <R> Stream<R> composeOn(
             WorkScheduler scheduler,
             ScopedWorkflows.StreamWorkflow<T, R> wf
@@ -236,7 +308,7 @@ public final class Stream<T> {
                                 );
                             }
 
-                            return next.flowable;
+                            return next.asFlowable();
                         })
         );
     }
@@ -263,16 +335,8 @@ public final class Stream<T> {
                                 return Flowable.just(value);
                             }
 
-                            Throwable error = errorSupplier.apply(value);
-
-                            if (error == null) {
-                                return Flowable.error(
-                                        new IllegalStateException(
-                                                "require() errorSupplier returned null"
-                                        )
-                                );
-                            }
-
+                            Throwable error = java.util.Objects.requireNonNullElseGet(errorSupplier.apply(value),
+                                    () -> new IllegalStateException("require() errorSupplier returned null"));
                             return Flowable.error(error);
                         })
         );
@@ -292,16 +356,8 @@ public final class Stream<T> {
                 flowable.observeOn(s)
                         .flatMap(value -> {
                             if (condition.test(value)) {
-                                Throwable error = errorSupplier.apply(value);
-
-                                if (error == null) {
-                                    return Flowable.error(
-                                            new IllegalStateException(
-                                                    "reject() errorSupplier returned null"
-                                            )
-                                    );
-                                }
-
+                                Throwable error = java.util.Objects.requireNonNullElseGet(errorSupplier.apply(value),
+                                        () -> new IllegalStateException("reject() errorSupplier returned null"));
                                 return Flowable.error(error);
                             }
 
@@ -341,14 +397,16 @@ public final class Stream<T> {
                                 );
                             }
 
-                            return next.flowable;
+                            return next.asFlowable();
                         })
         );
     }
 
     /**
-     * Dynamic branch selection.
+     * @deprecated Use {@link #then(WorkScheduler, ScopedBoundaries.StreamAsyncScope)}. Will be deleted in future releases.
+     * <p>Dynamic branch selection.</p>
      */
+    @Deprecated
     public <R> Stream<R> switchOn(
             WorkScheduler scheduler,
             Function<T, Stream<R>> decision
@@ -368,20 +426,42 @@ public final class Stream<T> {
                                 );
                             }
 
-                            return next.flowable;
+                            return next.asFlowable()
+                                    .onErrorResumeNext(this::recoverFinish);
                         })
         );
     }
+    // ===========================================================================================
+    // INTEROP
+    // ===========================================================================================
 
+    /**
+     * @return the underlying RxJava {@link Flowable} for framework integration,
+     * with any 'Finish' signal recovered into a normal success.
+     */
+    public Flowable<T> asTerminalFlowable() {
+        return flowable.onErrorResumeNext(this::recoverFinish);
+    }
+
+    /**
+     * @return the underlying RxJava {@link Flowable} for framework integration.
+     * Note: This Flowable may fail with an internal PipelineFinishException if a step finished early.
+     * Use {@link #asTerminalFlowable()} if you want a terminal Flowable.
+     */
+    public Flowable<T> asFlowable() {
+        return flowable;
+    }
     // ===========================================================================================
     // TERMINAL
     // ===========================================================================================
 
     public Disposable execute() {
-        return flowable.subscribe(
-                t -> { },
-                throwable -> RxLog.e(TAG, "Unhandled Throwable", throwable)
-        );
+        return flowable
+                .onErrorResumeNext(this::recoverFinish)
+                .subscribe(
+                        t -> { },
+                        throwable -> RxLog.e(TAG, "Unhandled Throwable", throwable)
+                );
     }
 
     public Disposable executeOn(
@@ -390,8 +470,17 @@ public final class Stream<T> {
             Consumer<Throwable> onError
     ) {
         return flowable
+                .onErrorResumeNext(this::recoverFinish)
                 .observeOn(SchedulerResolver.resolve(scheduler))
                 .subscribe(onNext, onError);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <R> Flowable<R> recoverFinish(Throwable e) {
+        if (e instanceof Work.PipelineFinishException) {
+            return Flowable.just((R) ((Work.PipelineFinishException) e).value);
+        }
+        return Flowable.error(e);
     }
 
     // ===========================================================================================

@@ -1,1 +1,0 @@
-packageSearchIndex = [{"l":"All Packages","u":"allpackages-index.html"},{"l":"com.benaether.rxon.core"},{"l":"com.benaether.rxon.rx"},{"l":"com.benaether.rxon.schedulers"},{"l":"com.benaether.rxon.scopes"}];updateSearchResults();

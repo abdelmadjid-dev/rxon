@@ -45,7 +45,7 @@ public class ScopedFunctions {
      * @param <T> input type
      */
     @FunctionalInterface
-    public interface ThrowingUnitFn<T> {
+    public interface ThrowingDoneFn<T> {
         /**
          * Apply the function.
          * @param t input

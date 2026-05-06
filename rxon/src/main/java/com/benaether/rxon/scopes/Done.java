@@ -19,21 +19,21 @@ package com.benaether.rxon.scopes;
 import androidx.annotation.NonNull;
 
 /**
- * Represents the absence of a meaningful value.
+ * Represents the completion of a process without a return value.
  *
- * <p>Use {@code Unit} instead of {@code Void} or {@code null}.
+ * <p>Use {@code Done} instead of {@code Void} or {@code null}.
+ * Replaces the legacy {@code Unit} type.</p>
  */
-public final class Unit {
+public final class Done {
 
-    /** Singleton instance of Unit. */
-    public static final Unit INSTANCE = new Unit();
+    /** Singleton instance of Done. */
+    public static final Done INSTANCE = new Done();
 
-    private Unit() {}
+    private Done() {}
 
     @NonNull
     @Override
     public String toString() {
-        return "Unit";
+        return "Done";
     }
 }
-
