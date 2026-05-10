@@ -1,107 +1,82 @@
 # RxOn
 
-**RxOn** is a disciplined, semantic DSL wrapper for RxJava 3. It enforces architectural patterns by providing explicit threading, controlled branching, and a strict no-null policy.
+RxOn is a semantic DSL wrapper for RxJava 3 that enforces architectural patterns through lazy pipeline orchestration, explicit threading, and strict null safety.
 
-## Why RxOn?
-
-*   **Explicit Threading**: No more `subscribeOn` or `observeOn` guessing. Every operation explicitly defines its execution context using `WorkScheduler`.
-*   **Zero Nullability**: Designed to fail fast. Emitting `null` at any point in the chain triggers an immediate, traceable error.
-*   **Railway-Oriented Programming**: First-class support for branching (`branch`) and early termination (`finish`, `fail`), avoiding deeply nested `flatMap` pyramids.
-*   **Encapsulation**: Keeps RxJava primitives (Single, Flowable, etc.) inside your infrastructure layer, exposing a clean, readable API to your business logic.
+## Core Features
+* **Lazy Orchestration**: Pipelines are declarative blueprints; execution is deferred until a terminal operator is invoked.
+* **Thread Isolation**: Operations explicitly define execution context via `WorkScheduler` (e.g., `.thenIo()`, `.thenCompute()`).
+* **Zero-Nesting Architecture**: Flat API structure for branching, error handling, and asynchronous composition.
+* **Null Safety**: immediate failure upon null emission in any stage of the pipeline.
+* **Functional Context**: Typed context propagation between isolated pipeline stages.
 
 ## Installation
 
 ### Gradle
-Add the dependency to your `build.gradle.kts`:
-
 ```kotlin
 dependencies {
-    implementation("com.benaether:rxon:0.2.2")
+    implementation("com.benaether:rxon:0.3.0-alpha")
 }
 ```
 
-## Documentation & Migration
-
-For detailed information on version updates and migration instructions, please refer to the following resources:
+## Documentation
 
 ### Changelogs
 | Version | Documentation | Description |
 | :--- | :--- | :--- |
-| **v0.2.2** | [Release Notes](changelogs/v0.2.2.md) | Split `then()` into `then()` (sync) and `chain()` (async) to resolve ambiguity. |
-| **v0.2.1** | [Release Notes](changelogs/v0.2.1.md) | Unified `then()` overloads, Throwable support, and specialized functional interfaces. |
-| **v0.2.0** | [Release Notes](changelogs/v0.2.0.md) | Unified semantic DSL, new entry points (`start`), and semantic finish mechanism. |
+| **v0.3.0-alpha** | [Release Notes](changelogs/v0.3.0-alpha.md) | Lazy orchestration engine, functional context, and component renames. |
+| **v0.2.2** | [Release Notes](changelogs/v0.2.2.md) | Sync/async chaining disambiguation. |
+| **v0.2.1** | [Release Notes](changelogs/v0.2.1.md) | Unified chaining and Throwable support. |
+| **v0.2.0** | [Release Notes](changelogs/v0.2.0.md) | Semantic DSL and pipeline API. |
 
 ### Migration Guides
 | From -> To | Guide | Description |
 | :--- | :--- | :--- |
-| **v0.2.1 -> v0.2.2** | [Migration Guide](migrations/MIGRATION_0.2.1_TO_0.2.2.md) | Moving to the split `then`/`chain` API. |
-| **v0.2.0 -> v0.2.1** | [Migration Guide](migrations/MIGRATION_0.2.0_TO_0.2.1.md) | Moving to unified `then()` overloads and handling lambda ambiguity. |
-| **v0.1.0 -> v0.2.0** | [Migration Guide](migrations/MIGRATION_0.1.0_TO_0.2.0.md) | Step-by-step guide to migrating to the unified semantic pipeline API. |
+| **v0.2.2 -> v0.3.0-alpha** | [Migration Guide](migrations/MIGRATION_0.2.2_TO_0.3.0-alpha.md) | Lazy pipelines and API refactoring. |
 
-## Setup & Initialization
+## Initialization
 
-RxOn can be initialized manually or automatically using a `ContentProvider`. The latter is recommended for Android projects to ensure the library is ready before any work starts.
+### Android (Automatic)
+Register `RxOnInitializer` in `AndroidManifest.xml`.
 
-### Automatic Initialization (Android)
-Add the `RxOnInitializer` to your `AndroidManifest.xml`. This ensures `RxOnConfig` is initialized as soon as the app starts.
-
-```xml
-<application>
-    <provider
-        android:name="com.benaether.rxon.sample.RxOnInitializer"
-        android:authorities="${applicationId}.rxon-init"
-        android:exported="false"
-        android:initOrder="100" />
-</application>
-```
-
-*(Note: Use your own implementation of `RxOnInitializer` that calls `RxOnConfig.init()` with your preferred settings.)*
-
-### Manual Initialization
-In your `Application.onCreate()` or main entry point:
-
+### Manual
 ```java
 RxOnConfig.builder()
-    .debug(BuildConfig.DEBUG)
-    .logger(new MyRxLogger())
-    .errorMapper(new MyApiErrorMapper())
+    .debug(DEBUG)
+    .logger(new MyLogger())
+    .errorMapper(new MyMapper())
     .init();
 ```
 
 ## Quick Start
 
-### Basic Work
-`Work<T>` represents a single-shot computation.
-
+### Lazy Pipeline
 ```java
-Work.start(WorkScheduler.IO, () -> repository.getUser(id))
-    .then(user -> transform(user))
-    .chain(user -> repository.save(user))
+Work.io(() -> repository.getUser(id))
+    .thenCompute(user -> transform(user))
+    .thenWrite(user -> repository.save(user))
     .executeOn(WorkScheduler.MAIN, 
         result -> ui.show(result),
         error -> ui.error(error)
     );
 ```
 
-### Continuous Stream
-`Stream<T>` represents continuous data over time.
-
+### Event Orchestration
 ```java
-Stream.start(WorkScheduler.IO, database.observeItems())
-    .thenOnlyIf(item -> item.isValid(), item -> Stream.start(WorkScheduler.COMPUTE, Flowable.just(item)))
-    .executeOn(WorkScheduler.MAIN, 
-        item -> ui.update(item),
-        error -> ui.handle(error)
+Observe.flow(uiEvents)
+    .debounce(300, TimeUnit.MILLISECONDS)
+    .trigger(
+        Work.withContext(() -> computeState())
+            .thenIo((ctx, event) -> sendAnalytics(ctx, event))
     );
 ```
 
-### Controlled Branching
+### Resilience & Compensation
 ```java
-work.chain(data -> {
-    if (data.isExpired()) return Work.fail(new ExpiredException());
-    if (data.isCached()) return Work.finish(data);
-    return fetchRemote(data);
-});
+Work.io(() -> fetchRemoteData())
+    .retry(3, 1000, ResiliencePolicy.BackoffStrategy.EXPONENTIAL)
+    .fallback(Work.read(() -> fetchLocalCache()))
+    .thenCompute(data -> process(data))
+    .execute();
 ```
 
 ## License

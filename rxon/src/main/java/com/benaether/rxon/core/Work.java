@@ -16,18 +16,18 @@
 
 package com.benaether.rxon.core;
 
-
 import com.benaether.rxon.rx.RxLog;
 import com.benaether.rxon.schedulers.WorkScheduler;
 import com.benaether.rxon.scopes.Done;
-import com.benaether.rxon.scopes.ScopedBoundaries;
-import com.benaether.rxon.scopes.ScopedFunctions;
-import com.benaether.rxon.scopes.ScopedWorkflows;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
-import io.reactivex.rxjava3.core.Completable;
-import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.core.Single;
 import io.reactivex.rxjava3.disposables.Disposable;
 import io.reactivex.rxjava3.functions.Consumer;
@@ -35,780 +35,278 @@ import io.reactivex.rxjava3.functions.Function;
 import io.reactivex.rxjava3.functions.Predicate;
 
 /**
- * {@code Work<T>} is a lightweight, opinionated DSL built on top of RxJava {@link Single}
- * for modeling synchronous and asynchronous units of work with explicit, semantic
- * threading and composition rules.
+ * {@code Work<T, C>} is a Lazy Orchestration Engine.
+ * It defines a "Pipeline" of semantic stages that are compiled into an executable 
+ * RxJava chain only when a terminal operator is invoked.
  *
- * <p>This type represents a <b>single, terminal computation</b> that emits exactly one
- * non-null value or an error.</p>
- *
- * <h2>Core principles</h2>
- *
- * <ul>
- *   <li>
- *     <b>Exactly one value</b>:
- *     {@code Work<T>} always emits exactly one value or fails
- *     (it is backed by {@link Single}).
- *   </li>
- *
- *   <li>
- *     <b>No null values</b>:
- *     Returning {@code null} from any transformation is illegal and will result
- *     in a {@link NullPointerException} thrown by RxJava.
- *   </li>
- *
- *   <li>
- *     <b>Explicit threading</b>:
- *     All execution happens on an explicitly provided {@link WorkScheduler}.
- *     Callers never manipulate raw {@link io.reactivex.rxjava3.core.Scheduler}s.
- *   </li>
- *
- *   <li>
- *     <b>Semantic composition</b>:
- *     Workflows encapsulate their own execution logic and threading.
- *     Callers only compose them; they never override internal schedulers.
- *   </li>
- * </ul>
- *
- * <h2>Nullability rules (CRITICAL)</h2>
- *
- * <p><b>Never return {@code null}</b> from any {@code Work} chain, including:</p>
- *
- * <ul>
- *   <li>Sync chaining ({@code on(...)})</li>
- *   <li>Async chaining ({@code onAsync(...)})</li>
- *   <li>Workflow composition</li>
- *   <li>Branching logic</li>
- * </ul>
- *
- * <p>RxJava does not permit {@code null} emissions. Violations will crash with:</p>
- *
- * <pre>{@code
- * NullPointerException: The mapper function returned a null value
- * }</pre>
- *
- * <h3>When absence of a value is valid</h3>
- *
- * <ul>
- *   <li>Return {@link java.util.Optional Optional&lt;T&gt;}</li>
- *   <li>Or return {@link Done} for no-value workflows</li>
- * </ul>
- *
- * <pre>{@code
- * // CORRECT
- * work.on(COMPUTE, value -> Optional.ofNullable(value));
- *
- * // INCORRECT (will crash)
- * work.on(COMPUTE, value -> null);
- * }</pre>
- *
- * <h3>{@code Work<Void>} warning</h3>
- *
- * <p>{@code Void} has no valid value and cannot be emitted safely.</p>
- *
- * <ul>
- *   <li>Returning {@code null} will crash</li>
- *   <li>{@code Work<Void>} should be avoided</li>
- * </ul>
- *
- * <p>Always prefer {@link Done} for workflows that conceptually return no value.</p>
- *
- * <h2>Branching &amp; conditional flow</h2>
- *
- * <p>{@code Work} supports explicit, first-class branching and early termination:</p>
- *
- * <ul>
- *   <li>
- *     <b>Conditional branching</b> via {@code branch(...)} and {@code branchAsync(...)}
- *   </li>
- *   <li>
- *     <b>Early termination without failure</b> via {@code haltIf(...)}
- *   </li>
- *   <li>
- *     <b>Fail-fast termination</b> via {@code failIf(...)}
- *   </li>
- * </ul>
- *
- * <p>This enables a Railway-Oriented Programming style where:</p>
- *
- * <ul>
- *   <li>Success continues the chain</li>
- *   <li>Failures stop execution immediately</li>
- *   <li>Errors are handled as early as possible</li>
- * </ul>
- *
- * <h2>Execution</h2>
- *
- * <ul>
- *   <li>
- *     {@link #executeOn(WorkScheduler, Consumer, Consumer)} executes the chain
- *     and delivers terminal callbacks on the provided scheduler.
- *   </li>
- * </ul>
- *
- * <h2>Encapsulation rule</h2>
- *
- * <p>
- * RxJava primitives ({@link Single}, {@link io.reactivex.rxjava3.core.Scheduler}, etc.)
- * are <b>never exposed</b> outside infrastructure boundaries.
- * </p>
- *
- * <p>
- * All creation and composition must go through semantic DSL entry points
- * such as {@code on(...)}, {@code onAsync(...)}, and workflows.
- * </p>
- *
- * <h2>Intended usage</h2>
- *
- * <ul>
- *   <li>Repositories and services return {@code Work<T>}</li>
- *   <li>ViewModels compose {@code Work}</li>
- *   <li>UI layers execute and observe results</li>
- * </ul>
+ * <p>Operations are deferred, allowing for declarative resilience policies,
+ * implicit state (context) propagation, and strict Clean Architecture boundaries.</p>
  *
  * @param <T> emission type
+ * @param <C> context type
  */
-public final class Work<T> {
+public final class Work<T, C> {
     private static final String TAG = Work.class.getName();
 
-    private final Single<T> single;
+    private final List<PipelineStage> stages;
 
-    Work(Single<T> single) {
-        this.single = single;
+    private Work(List<PipelineStage> stages) {
+        this.stages = Collections.unmodifiableList(stages);
+    }
+
+    private <R, NewC> Work<R, NewC> append(PipelineStage stage) {
+        List<PipelineStage> newStages = new ArrayList<>(this.stages);
+        newStages.add(stage);
+        return new Work<>(newStages);
     }
 
     /**
-     * Special exception used to signal a semantic early return (finish) in the pipeline.
+     * Start a fresh pipeline with a lazy initial context state.
+     * The supplier runs on the computation scheduler.
      */
-    static final class PipelineFinishException extends RuntimeException {
-        final Object value;
-        PipelineFinishException(Object value) {
-            super("Pipeline finished early");
-            this.value = value;
-        }
-    }
-
-    // ===========================================================================================
-    // INTERNAL PRIMITIVE BUILDERS
-    // ===========================================================================================
-
-    private static <T> Work<T> fromCallable(Callable<T> task, Scheduler scheduler) {
-        return new Work<>(Single.fromCallable(task).subscribeOn(scheduler));
-    }
-
-    private static <T> Work<T> fromSingle(Single<T> source, Scheduler scheduler) {
-        return new Work<>(mapErrors(source).subscribeOn(scheduler));
-    }
-
-    // ===========================================================================================
-    // PIPELINE DSL — ENTRY POINTS
-    // ===========================================================================================
-
-    /**
-     * Start a new Work pipeline from a synchronous task.
-     */
-    public static <T> Work<T> start(WorkScheduler scheduler, Callable<T> task) {
-        return fromCallable(task, SchedulerResolver.resolve(scheduler));
+    public static <C> Work<Done, C> withContext(Supplier<C> contextSupplier) {
+        return new Work<Done, Object>(new ArrayList<>())
+            .updateContext((ctx, val) -> contextSupplier.get());
     }
 
     /**
-     * Start a new Work pipeline from an asynchronous source.
+     * Set the context for subsequent stages based on the current value.
+     * This replaces any existing context.
      */
-    public static <T> Work<T> start(WorkScheduler scheduler, Single<T> source) {
-        return fromSingle(source, SchedulerResolver.resolve(scheduler));
+    public <NewC> Work<T, NewC> usingContext(java.util.function.Function<T, NewC> mapper) {
+        return updateContext((ctx, val) -> mapper.apply(val));
     }
 
     /**
-     * Start a new Work pipeline from a completable source.
+     * Change the context type entirely into a different object/type.
      */
-    public static Work<Done> start(WorkScheduler scheduler, Completable source) {
-        return fromSingle(source.toSingleDefault(Done.INSTANCE),
-                SchedulerResolver.resolve(scheduler));
+    public <NewC> Work<T, NewC> updateContext(BiFunction<C, T, NewC> mapper) {
+        return thenCompute((ctx, val) -> val, mapper);
     }
 
     /**
-     * Start a new Work pipeline from a side-effect task.
+     * Create a pipeline that starts with a synchronous read operation.
+     * Resolves to {@link WorkScheduler#DATA_READ}.
      */
-    public static Work<Done> start(WorkScheduler scheduler, Runnable task) {
-        return start(scheduler, () -> {
-            task.run();
-            return Done.INSTANCE;
+    public static <T> Work<T, Object> read(Callable<T> task) {
+        return new Work<Done, Object>(new ArrayList<>()).thenRead(task);
+    }
+
+    /**
+     * Create a pipeline that starts with an asynchronous IO operation.
+     * Resolves to {@link WorkScheduler#IO}.
+     */
+    public static <T> Work<T, Object> io(Callable<T> task) {
+        return new Work<Done, Object>(new ArrayList<>()).thenIo(task);
+    }
+
+    /**
+     * Create a pipeline that starts with a synchronous write operation.
+     * Resolves to {@link WorkScheduler#DATA_WRITE}.
+     */
+    public static Work<Done, Object> write(Runnable task) {
+        return new Work<Done, Object>(new ArrayList<>()).thenWrite(task);
+    }
+
+    /**
+     * Create a pipeline that starts with a CPU-intensive computation.
+     * Resolves to {@link WorkScheduler#COMPUTE}.
+     */
+    public static <T> Work<T, Object> compute(Callable<T> task) {
+        return new Work<Done, Object>(new ArrayList<>()).thenCompute(ignored -> {
+            try { return task.call(); }
+            catch (Exception e) { throw new RuntimeException(e); }
         });
     }
 
-    // ===========================================================================================
-    // ENTRY POINTS — SYNC
-    // ===========================================================================================
-
-    /** @deprecated Use {@link #start(WorkScheduler, Callable)}. Will be deleted in future releases. */
-    @Deprecated
-    public static <T> Work<T> on(WorkScheduler workScheduler, Callable<T> task) {
-        return start(workScheduler, task);
-    }
-
-    // ===========================================================================================
-    // ENTRY POINTS — ASYNC
-    // ===========================================================================================
-
-    /** @deprecated Use {@link #start(WorkScheduler, Single)}. Will be deleted in future releases. */
-    @Deprecated
-    public static <T> Work<T> onAsync(WorkScheduler workScheduler, Single<T> source) {
-        return start(workScheduler, source);
-    }
-
-    /** @deprecated Use {@link #start(WorkScheduler, Completable)}. Will be deleted in future releases. */
-    @Deprecated
-    public static Work<Done> onAsync(WorkScheduler workScheduler, Completable source) {
-        return start(workScheduler, source);
-    }
-
-    // ===========================================================================================
-    // ENTRY POINTS — DONE (NO RETURN VALUE)
-    // ===========================================================================================
-
-    /** @deprecated Use {@link #start(WorkScheduler, Runnable)}. Will be deleted in future releases. */
-    @Deprecated
-    public static Work<Done> onUnit(WorkScheduler workScheduler, Runnable task) {
-        return start(workScheduler, task);
-    }
-
-    // ===========================================================================================
-    // ENTRY POINTS — WORKFLOWS
-    // ===========================================================================================
-
-    public static <I, O> Work<O> fromWorkflow(ScopedWorkflows.Workflow<I, O> wf, I input) {
-        return wf.apply(input);
-    }
-
-    public static <O> Work<O> fromWorkflow(ScopedWorkflows.Workflow0<O> wf) {
-        return wf.apply();
-    }
-
-    // ===========================================================================================
-    // PIPELINE DSL — CHAINING
-    // ===========================================================================================
-
     /**
-     * Chain another Work.
+     * Create a pipeline that starts on the main application thread.
+     * Resolves to {@link WorkScheduler#MAIN}.
      */
-    public <R> Work<R> chain(ScopedBoundaries.WorkScope<T, R> fn) {
-        return new Work<>(asSingle().flatMap(t -> fn.apply(t).asSingle()));
+    public static Work<Done, Object> main(Runnable task) {
+        return new Work<Done, Object>(new ArrayList<>()).thenMain(ignored -> task.run());
     }
 
-    /**
-     * Chain another Work on a specific scheduler.
-     */
-    public <R> Work<R> chain(WorkScheduler scheduler, ScopedBoundaries.WorkScope<T, R> fn) {
-        Scheduler s = SchedulerResolver.resolve(scheduler);
-
-        return new Work<>(
-                single.observeOn(s)
-                        .flatMap(value -> {
-                            Work<R> next = fn.apply(value);
-
-                            if (next == null) {
-                                return Single.error(
-                                        new IllegalStateException(
-                                                "chain() mapping returned null Work"
-                                        )
-                                );
-                            }
-
-                            return next.asSingle();
-                        })
-        );
+    public static <T> Work<T, Object> finish(T value) {
+        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.FinishStage(value));
     }
 
-    /**
-     * Chain an asynchronous transformation (Single flatMap).
-     */
-    public <R> Work<R> chainSingle(ScopedBoundaries.AsyncScope<T, R> fn) {
-        return chainFlatMap(fn::apply);
+    public static <T> Work<T, Object> fail(Throwable error) {
+        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.FailStage(error));
     }
 
-    /**
-     * Chain an asynchronous transformation (Single flatMap) on a specific scheduler.
-     */
-    public <R> Work<R> chainSingle(WorkScheduler scheduler, ScopedBoundaries.AsyncScope<T, R> fn) {
-        return chainFlatMap(fn::apply, SchedulerResolver.resolve(scheduler));
-    }
-
-    /**
-     * Chain an asynchronous Completable.
-     */
-    public Work<Done> chainCompletable(ScopedBoundaries.AsyncCompletableScope<T> fn) {
-        return chainFlatMap(t -> fn.apply(t).toSingleDefault(Done.INSTANCE));
-    }
-
-    /**
-     * Chain an asynchronous Completable on a specific scheduler.
-     */
-    public Work<Done> chainCompletable(WorkScheduler scheduler, ScopedBoundaries.AsyncCompletableScope<T> fn) {
-        return chainFlatMap(t -> fn.apply(t).toSingleDefault(Done.INSTANCE), SchedulerResolver.resolve(scheduler));
-    }
-
-    /**
-     * Chain a synchronous transformation (Map).
-     */
-    public <R> Work<R> then(ScopedFunctions.ThrowingFn<T, R> fn) {
-        return thenMap(fn);
-    }
-
-    /**
-     * Chain a synchronous transformation (Map) on a specific scheduler.
-     */
-    public <R> Work<R> then(WorkScheduler scheduler, ScopedFunctions.ThrowingFn<T, R> fn) {
-        return thenMap(fn, SchedulerResolver.resolve(scheduler));
-    }
-
-    // ===========================================================================================
-    // CHAINING — SYNC
-    // ===========================================================================================
-
-    private <R> Work<R> thenMap(Function<T, R> fn) {
-        return new Work<>(single.map(fn));
-    }
-
-    private <R> Work<R> thenMap(Function<T, R> fn, Scheduler scheduler) {
-        return new Work<>(single.observeOn(scheduler).map(fn));
-    }
-
-    /** @deprecated Use {@link #then(WorkScheduler, ScopedFunctions.ThrowingFn)}. Will be deleted in future releases. */
-    @Deprecated
-    public <R> Work<R> on(WorkScheduler workScheduler, ScopedFunctions.ThrowingFn<T, R> fn) {
-        return thenMap(fn, SchedulerResolver.resolve(workScheduler));
-    }
-
-    // ===========================================================================================
-    // CHAINING — ASYNC
-    // ===========================================================================================
-
-    private <R> Work<R> chainFlatMap(Function<T, Single<R>> fn) {
-        return new Work<>(single.flatMap(t -> mapErrors(fn.apply(t))));
-    }
-
-    private <R> Work<R> chainFlatMap(Function<T, Single<R>> fn, Scheduler scheduler) {
-        return new Work<>(single.observeOn(scheduler)
-                .flatMap(t -> mapErrors(fn.apply(t))));
-    }
-
-    /** @deprecated Use {@link #chainSingle(WorkScheduler, ScopedBoundaries.AsyncScope)}. Will be deleted in future releases. */
-    @Deprecated
-    public <R> Work<R> onAsync(WorkScheduler workScheduler,
-                               ScopedBoundaries.AsyncScope<T, R> fn) {
-        return chainSingle(workScheduler, fn);
-    }
-
-
-    // ===========================================================================================
-    // UNIT CHAINING (SYNC SIDE EFFECTS)
-    // ===========================================================================================
-
-    /** @deprecated Use semantic operators. Will be deleted in future releases. */
-    @Deprecated
-    public Work<Done> onUnit(WorkScheduler workScheduler, ScopedFunctions.ThrowingDoneFn<T> fn) {
-        return thenMap(t -> {
-            fn.apply(t);
-            return Done.INSTANCE;
-        }, SchedulerResolver.resolve(workScheduler));
-    }
-
-    // ===========================================================================================
-    // CHAINING — UNIT (ASYNC SIDE EFFECTS)
-    // ===========================================================================================
-
-    /** @deprecated Use {@link #chainSingle(WorkScheduler, ScopedBoundaries.AsyncScope)}. Will be deleted in future releases. */
-    @Deprecated
-    public Work<Done> onAsyncUnit(WorkScheduler workScheduler, ScopedBoundaries.AsyncScope<T,
-            ?> fn) {
-        return chainSingle(workScheduler, t -> fn.apply(t).map(ignored -> Done.INSTANCE));
-    }
-
-    /** @deprecated Use {@link #chainCompletable(WorkScheduler, ScopedBoundaries.AsyncCompletableScope)}. Will be deleted in future releases. */
-    @Deprecated
-    public Work<Done> onAsyncCompletable(WorkScheduler workScheduler,
-                                         ScopedBoundaries.AsyncCompletableScope<T> fn) {
-        return chainCompletable(workScheduler, fn);
-    }
-
-    // ===========================================================================================
-    // Scoped COMPOSITION — WORKFLOWS INPUT/NO-INPUT
-    // ===========================================================================================
-
-    /**
-     * @deprecated Use {@link #chain(ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
-     * <p>Composition with no extra logic.</p>
-     */
-    @Deprecated
-    public <R> Work<R> compose(ScopedWorkflows.Workflow<T, R> wf) {
-        return chain((ScopedBoundaries.WorkScope<T, R>) wf::apply);
-    }
-
-    /**
-     * @deprecated Use {@link #chain(ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
-     * <p>Composition with no extra logic.</p>
-     */
-    @Deprecated
-    public <R> Work<R> compose(ScopedWorkflows.Workflow0<R> wf) {
-        return chain((ScopedBoundaries.WorkScope<T, R>) ignored -> wf.apply());
-    }
-
-    /**
-     * @deprecated Use {@link #chain(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases.
-     * <p>Compose another Workflow.</p>
-     */
-    @Deprecated
-    public <R> Work<R> composeOn(WorkScheduler workScheduler, ScopedWorkflows.Workflow<T, R> wf) {
-        return chain(workScheduler, (ScopedBoundaries.WorkScope<T, R>) wf::apply);
-    }
-
-    /** @deprecated Use {@link #chain(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases. */
-    @Deprecated
-    public <R> Work<R> composeOn(WorkScheduler workScheduler, ScopedWorkflows.Workflow0<R> wf) {
-        return chain(workScheduler, (ScopedBoundaries.WorkScope<T, R>) ignored -> wf.apply());
-    }
-
-    // ===========================================================================================
-    // GUARDS (CHAIN BREAKING)
-    // ===========================================================================================
-
-    /**
-     * Continue only if condition is satisfied.
-     * Otherwise fail the chain with supplied error.
-     */
-    public Work<T> require(
-            WorkScheduler scheduler,
-            Predicate<T> condition,
-            Function<T, Throwable> errorSupplier
-    ) {
-        Scheduler s = SchedulerResolver.resolve(scheduler);
-
-        return new Work<>(
-                single.observeOn(s)
-                        .flatMap(value -> {
-                            if (condition.test(value)) {
-                                return Single.just(value);
-                            }
-
-                            Throwable error = java.util.Objects.requireNonNullElseGet(errorSupplier.apply(value),
-                                    () -> new IllegalStateException("require() errorSupplier returned null"));
-                            return Single.error(error);
-                        })
-        );
-    }
-
-
-    /**
-     * Fail if condition is satisfied.
-     * Otherwise continue normally.
-     */
-    public Work<T> reject(
-            WorkScheduler scheduler,
-            Predicate<T> condition,
-            Function<T, Throwable> errorSupplier
-    ) {
-        Scheduler s = SchedulerResolver.resolve(scheduler);
-
-        return new Work<>(
-                single.observeOn(s)
-                        .flatMap(value -> {
-                            if (condition.test(value)) {
-                                Throwable error = java.util.Objects.requireNonNullElseGet(errorSupplier.apply(value),
-                                        () -> new IllegalStateException("reject() errorSupplier returned null"));
-                                return Single.error(error);
-                            }
-
-                            return Single.just(value);
-                        })
-        );
-    }
-
-    /**
-     * Continue if condition satisfied.
-     * Otherwise halt gracefully by replacing the value.
-     * <p>
-     * NOTE:
-     * fallback must never return null.
-     */
-    public Work<T> requireOrHalt(
-            WorkScheduler scheduler,
-            Predicate<T> condition,
-            Function<T, T> fallback
-    ) {
-        Scheduler s = SchedulerResolver.resolve(scheduler);
-
-        return new Work<>(
-                single.observeOn(s)
-                        .flatMap(value -> {
-                            if (condition.test(value)) {
-                                return Single.just(value);
-                            }
-
-                            T newValue = fallback.apply(value);
-
-                            if (newValue == null) {
-                                return Single.error(
-                                        new IllegalStateException("requireOrHalt() fallback returned null")
-                                );
-                            }
-
-                            return Single.just(newValue);
-                        })
-        );
-    }
-
-
-    // ===========================================================================================
-    // BRANCHING (IF / ELSE)
-    // ===========================================================================================
-
-    /**
-     * Branch the chain into two possible Work paths.
-     * <p>
-     * If condition is true  -> execute ifTrue
-     * If condition is false -> execute ifFalse
-     * <p>
-     * Both branches must return non-null Work.
-     */
-    public <R> Work<R> branch(
-            WorkScheduler scheduler,
-            Predicate<T> condition,
-            Function<T, Work<R>> ifTrue,
-            Function<T, Work<R>> ifFalse
-    ) {
-        Scheduler s = SchedulerResolver.resolve(scheduler);
-
-        return new Work<>(
-                single.observeOn(s)
-                        .flatMap(value -> {
-                            Work<R> next =
-                                    condition.test(value)
-                                            ? ifTrue.apply(value)
-                                            : ifFalse.apply(value);
-
-                            if (next == null) {
-                                return Single.error(
-                                        new IllegalStateException("branch() returned null Work")
-                                );
-                            }
-
-                            return next.asSingle();
-                        })
-        );
-    }
-
-    // ===========================================================================================
-    // BRANCHING — CONTROL FLOW
-    // ===========================================================================================
-
-    /** @deprecated Use {@link #chain(WorkScheduler, ScopedBoundaries.WorkScope)}. Will be deleted in future releases. */
-    @Deprecated
-    public <R> Work<R> switchOn(
-            WorkScheduler scheduler,
-            Function<T, Work<R>> decision
-    ) {
-        return chain(scheduler, decision::apply);
-    }
-
-    /** @deprecated Use {@link #finish(Object)}. Will be deleted in future releases. */
-    @Deprecated
-    public static <T> Work<T> halt(T value) {
-        return finish(value);
-    }
-
-    /**
-     * Immediately terminate the current branch successfully with a value.
-     *
-     * <p>This is a semantic early-return mechanism.</p>
-     *
-     * <p><b>Behavior</b></p>
-     * <ul>
-     *   <li>No further downstream operations in the original branch execute.</li>
-     *   <li>The pipeline completes successfully with the provided value.</li>
-     *   <li>No error is thrown in terminal operators.</li>
-     * </ul>
-     *
-     * <p><b>Important</b></p>
-     * <p>The value must not be null.</p>
-     *
-     * <p><b>Example</b></p>
-     *
-     * <pre>{@code
-     * if (cacheHit) {
-     *     return Work.finish(cachedValue);
-     * }
-     * }</pre>
-     *
-     * @param value non-null value to emit
-     * @param <T> type of value
-     * @return Work that immediately finishes the pipeline with the value
-     */
-    public static <T> Work<T> finish(T value) {
-        if (value == null) {
-            return new Work<>(Single.error(
-                    new NullPointerException("finish() value cannot be null")
-            ));
-        }
-
-        return new Work<>(Single.error(new PipelineFinishException(value)));
-    }
-
-    /**
-     * Immediately terminate the current branch with an error.
-     *
-     * <p>This is a semantic failure mechanism used inside branching logic.</p>
-     *
-     * <p><b>Behavior</b></p>
-     * <ul>
-     *   <li>Stops further execution of the current chain.</li>
-     *   <li>Propagates the error downstream.</li>
-     *   <li>Will be delivered to the terminal {@code executeOn(...)} error handler.</li>
-     * </ul>
-     *
-     * <p><b>Example</b></p>
-     *
-     * <pre>{@code
-     * if (!authorized) {
-     *     return Work.fail(new UnauthorizedException());
-     * }
-     * }</pre>
-     *
-     * @param error non-null Throwable
-     * @param <T> expected type of Work
-     * @return Work that fails immediately
-     */
-    public static <T> Work<T> fail(Throwable error) {
-        Throwable actualError = java.util.Objects.requireNonNullElseGet(error,
-                () -> new NullPointerException("fail() error cannot be null"));
-        return new Work<>(Single.error(actualError));
-    }
-
-
-
-
-    // ===========================================================================================
-    // SEMANTIC CONDITIONAL OPERATORS
-    // ===========================================================================================
-
-    /**
-     * Executes an optional side-effect Work if the condition is satisfied.
-     * Always continues with the original value regardless of the condition.
-     *
-     * @param condition  predicate to evaluate
-     * @param sideEffect Work to execute if condition is true
-     * @return Work that emits the original value
-     */
-    public Work<T> chainIf(Predicate<T> condition, Function<T, Work<?>> sideEffect) {
-        return new Work<>(asSingle().flatMap(value -> {
-            if (condition.test(value)) {
-                Work<?> next = sideEffect.apply(value);
-                if (next == null) {
-                    return Single.error(new IllegalStateException("chainIf() sideEffect returned null"));
-                }
-                return next.asSingle().map(ignored -> value);
-            }
-            return Single.just(value);
-        }));
-    }
-
-    /**
-     * Continues with the mapping Work ONLY if the condition is satisfied.
-     * Otherwise, halts the chain successfully with the current value.
-     *
-     * @param condition predicate to evaluate
-     * @param mapping   Work to execute if condition is true
-     * @param <R>       resulting type (must be compatible with T in halt case)
-     * @return Work representing the continuation or halt
-     */
-    public <R> Work<R> chainOnlyIf(Predicate<T> condition, Function<T, Work<R>> mapping) {
-        return new Work<>(asSingle().flatMap(value -> {
-            if (condition.test(value)) {
-                Work<R> next = mapping.apply(value);
-                if (next == null) {
-                    return Single.error(new IllegalStateException("chainOnlyIf() mapping returned null"));
-                }
-                return next.asSingle();
-            }
-            // Semantic Early Return: Finish the chain with the current value
-            return Single.error(new PipelineFinishException(value));
-        }));
-    }
-
-    // ===========================================================================================
-    // INTEROP
-    // ===========================================================================================
-
-    /**
-     * @return the underlying RxJava {@link Single} for framework integration,
-     * with any 'Finish' signal recovered into a normal success.
-     */
-    public Single<T> asTerminalSingle() {
-        return single.onErrorResumeNext(this::recoverFinish);
-    }
-
-    /**
-     * @return the underlying RxJava {@link Single} for framework integration.
-     * Note: This Single may fail with an internal PipelineFinishException if the pipeline finished early.
-     * Use {@link #asTerminalSingle()} if you want a terminal Single.
-     */
-    public Single<T> asSingle() {
-        return single;
-    }
-
-    // ===========================================================================================
-    // TERMINAL
-    // ===========================================================================================
-
-    public Disposable execute() {
-        return single
-                .onErrorResumeNext(this::recoverFinish)
-                .subscribe(
-                        t -> { },
-                        throwable -> RxLog.e(TAG, "Unhandled Throwable", throwable)
-                );
-    }
-
-    public Disposable executeOn(WorkScheduler workScheduler, Consumer<T> onSuccess,
-                                 Consumer<Throwable> onError) {
-        return single
-                .onErrorResumeNext(this::recoverFinish)
-                .observeOn(SchedulerResolver.resolve(workScheduler))
-                .subscribe(onSuccess, onError);
-    }
-
-    public Disposable executeResOn(WorkScheduler workScheduler, Consumer<T> onSuccess) {
-        return single
-                .onErrorResumeNext(this::recoverFinish)
-                .observeOn(SchedulerResolver.resolve(workScheduler))
-                .subscribe(
-                        onSuccess,
-                        throwable -> RxLog.e(TAG, "Unhandled Throwable", throwable)
-                );
-    }
-
-    public Disposable executeErrOn(WorkScheduler workScheduler, Consumer<Throwable> onError) {
-        return single
-                .onErrorResumeNext(this::recoverFinish)
-                .observeOn(SchedulerResolver.resolve(workScheduler))
-                .subscribe(t -> { }, onError);
+    public <R> Work<R, C> thenRead(Callable<R> task) {
+        return thenRead((ctx, ignored) -> {
+            try { return task.call(); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        }, (ctx, res) -> ctx);
     }
 
     @SuppressWarnings("unchecked")
-    private Single<T> recoverFinish(Throwable e) {
-        if (e instanceof PipelineFinishException) {
-            return Single.just((T) ((PipelineFinishException) e).value);
+    public <R, NewC> Work<R, NewC> thenRead(BiFunction<C, Object, R> task, BiFunction<C, R, NewC> mapper) {
+        return append(new PipelineStage.ReadStage(
+            (ctx, input) -> task.apply((C) ctx, input),
+            (ctx, res) -> mapper.apply((C) ctx, (R) res)
+        ));
+    }
+
+    public <R> Work<R, C> thenIo(Callable<R> task) {
+        return thenIo((ctx, input) -> {
+            try { return task.call(); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        }, (ctx, res) -> ctx);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <R, NewC> Work<R, NewC> thenIo(BiFunction<C, T, R> task, BiFunction<C, R, NewC> mapper) {
+        return append(new PipelineStage.IoStage(
+            (ctx, val) -> task.apply((C) ctx, (T) val),
+            (ctx, res) -> mapper.apply((C) ctx, (R) res)
+        ));
+    }
+
+    public Work<T, C> thenWrite(Runnable task) {
+        return thenWrite((ctx, input) -> task.run(), (ctx, res) -> ctx);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <NewC> Work<T, NewC> thenWrite(BiConsumer<C, T> task, BiFunction<C, T, NewC> mapper) {
+        return append(new PipelineStage.WriteStage(
+            (ctx, val) -> task.accept((C) ctx, (T) val),
+            (ctx, val) -> mapper.apply((C) ctx, (T) val)
+        ));
+    }
+
+    public <R> Work<R, C> thenCompute(Function<T, R> task) {
+        return thenCompute((ctx, input) -> {
+            try { return task.apply(input); }
+            catch (Throwable e) { throw new RuntimeException(e); }
+        }, (ctx, res) -> ctx);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <R, NewC> Work<R, NewC> thenCompute(BiFunction<C, T, R> task, BiFunction<C, R, NewC> mapper) {
+        return append(new PipelineStage.ComputeStage(
+            (ctx, input) -> {
+                try { return task.apply((C) ctx, (T) input); }
+                catch (RuntimeException e) { throw e; }
+                catch (Throwable e) { throw new RuntimeException(e); }
+            },
+            (ctx, res) -> mapper.apply((C) ctx, (R) res)
+        ));
+    }
+
+    public Work<T, C> thenMain(Consumer<T> task) {
+        return thenMain((ctx, input) -> {
+            try { task.accept(input); }
+            catch (Throwable e) { throw new RuntimeException(e); }
+        }, (ctx, res) -> ctx);
+    }
+
+    @SuppressWarnings("unchecked")
+    public <NewC> Work<T, NewC> thenMain(BiConsumer<C, T> task, BiFunction<C, T, NewC> mapper) {
+        return append(new PipelineStage.MainStage(
+            (ctx, val) -> task.accept((C) ctx, (T) val),
+            (ctx, val) -> mapper.apply((C) ctx, (T) val)
+        ));
+    }
+
+    public Work<T, C> require(Predicate<T> condition, Function<T, Throwable> errorSupplier) {
+        return thenCompute((ctx, t) -> {
+            try {
+                if (condition.test(t)) return t;
+                Throwable error = errorSupplier.apply(t);
+                if (error instanceof RuntimeException re) throw re;
+                throw new RuntimeException(error);
+            } catch (Throwable e) {
+                if (e instanceof RuntimeException re) throw re;
+                throw new RuntimeException(e);
+            }
+        }, (ctx, res) -> ctx);
+    }
+
+    public Work<T, C> reject(Predicate<T> condition, Function<T, Throwable> errorSupplier) {
+        return thenCompute((ctx, t) -> {
+            try {
+                if (!condition.test(t)) return t;
+                Throwable error = errorSupplier.apply(t);
+                if (error instanceof RuntimeException re) throw re;
+                throw new RuntimeException(error);
+            } catch (Throwable e) {
+                if (e instanceof RuntimeException re) throw re;
+                throw new RuntimeException(e);
+            }
+        }, (ctx, res) -> ctx);
+    }
+
+    public Work<T, C> retry(int max, long delay, ResiliencePolicy.BackoffStrategy strategy) {
+        return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
+                new ResiliencePolicy.RetryPolicy(max, delay, strategy),
+                m.timeout(), m.fallback(), m.compensation()
+        ));
+    }
+
+    public Work<T, C> timeout(long duration, java.util.concurrent.TimeUnit unit) {
+        return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
+                m.retry(),
+                new ResiliencePolicy.TimeoutPolicy(duration, unit),
+                m.fallback(), m.compensation()
+        ));
+    }
+
+    public Work<T, C> fallback(Work<T, C> fallbackWork) {
+        return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
+                m.retry(), m.timeout(), fallbackWork, m.compensation()
+        ));
+    }
+
+    public Work<T, C> compensate(Work<Done, ?> compensationWork) {
+        return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
+                m.retry(), m.timeout(), m.fallback(), compensationWork
+        ));
+    }
+
+    private Work<T, C> updateLastResilience(java.util.function.Function<ResiliencePolicy.ResilienceMetadata, ResiliencePolicy.ResilienceMetadata> updater) {
+        if (stages.isEmpty()) return this;
+
+        List<PipelineStage> newStages = new ArrayList<>(this.stages);
+        PipelineStage last = newStages.remove(newStages.size() - 1);
+
+        ResiliencePolicy.ResilienceMetadata newM = updater.apply(last.resilience());
+
+        PipelineStage updated;
+        if (last instanceof PipelineStage.ReadStage s) {
+            updated = new PipelineStage.ReadStage(s.task(), s.contextMapper(), newM);
+        } else if (last instanceof PipelineStage.WriteStage s) {
+            updated = new PipelineStage.WriteStage(s.task(), s.contextMapper(), newM);
+        } else if (last instanceof PipelineStage.IoStage s) {
+            updated = new PipelineStage.IoStage(s.task(), s.contextMapper(), newM);
+        } else if (last instanceof PipelineStage.ComputeStage s) {
+            updated = new PipelineStage.ComputeStage(s.task(), s.contextMapper(), newM);
+        } else if (last instanceof PipelineStage.MainStage s) {
+            updated = new PipelineStage.MainStage(s.task(), s.contextMapper(), newM);
+        } else {
+            updated = last;
         }
-        return Single.error(e);
+
+        newStages.add(updated);
+        return new Work<>(newStages);
     }
 
-    // ===========================================================================================
-    // UTIL
-    // ===========================================================================================
-
-    private static <T> Single<T> mapErrors(Single<T> source) {
-        return source.onErrorResumeNext(e ->
-                Single.error(RxOnConfig.mapError(e)));
+    public Single<T> asTerminalSingle() {
+        return PipelineCompiler.compile(stages, () -> null);
     }
 
+    public Disposable execute() {
+        return asTerminalSingle().subscribe(
+                t -> { },
+                throwable -> RxLog.e(TAG, "Unhandled Throwable", throwable)
+        );
+    }
+
+    public Disposable executeOn(WorkScheduler workScheduler, Consumer<T> onSuccess, Consumer<Throwable> onError) {
+        return asTerminalSingle()
+                .observeOn(SchedulerResolver.resolve(workScheduler))
+                .subscribe(onSuccess, onError);
+    }
 }
-

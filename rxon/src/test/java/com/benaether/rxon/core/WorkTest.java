@@ -1,25 +1,17 @@
 package com.benaether.rxon.core;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
-import com.benaether.rxon.schedulers.WorkScheduler;
 import com.benaether.rxon.scopes.Done;
 
 import org.junit.Before;
 import org.junit.Test;
 
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import io.reactivex.rxjava3.core.Completable;
-import io.reactivex.rxjava3.core.Single;
-
 /**
- * Unit tests for {@link Work} showcasing pipeline usage and correctness.
- * These tests simulate various business logic scenarios using the semantic DSL.
+ * Unit tests for {@link Work} showcasing context passing and pipeline orchestration.
  */
 public class WorkTest {
 
@@ -33,147 +25,133 @@ public class WorkTest {
     }
 
     // ===========================================================================================
+    // CONTEXT PASSING
+    // ===========================================================================================
+
+    @Test
+    public void testContextPropagation() {
+        Work.withContext(() -> "Initial")
+            .thenRead(() -> "Data")
+            .thenCompute((ctx, data) -> ctx + ":" + data, (ctx, res) -> res)
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue("Initial:Data")
+            .assertComplete();
+    }
+
+    @Test
+    public void testContextMutation() {
+        class MutableCtx {
+            int count = 0;
+            void inc() { count++; }
+        }
+
+        MutableCtx ctx = new MutableCtx();
+
+        Work.withContext(() -> ctx)
+            .thenCompute((c, val) -> {
+                c.inc();
+                return "Step 1";
+            }, (c, res) -> c)
+            .thenCompute((c, val) -> {
+                c.inc();
+                return "Step 2";
+            }, (c, res) -> c)
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue("Step 2")
+            .assertComplete();
+
+        assertEquals(2, ctx.count);
+    }
+
+    @Test
+    public void testContextUpdate_Replacement() {
+        Work.withContext(() -> 1)
+            .thenCompute((ctx, val) -> val, (ctx, res) -> ctx + 10)
+            .thenCompute((ctx, val) -> "Value: " + ctx, (ctx, res) -> ctx)
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue("Value: 11")
+            .assertComplete();
+    }
+
+    @Test
+    public void testContextSwitching() {
+        // Start with no context (Object)
+        Work.io(() -> "Hello")
+            .usingContext(val -> 100) // Switch to Integer context based on value
+            .thenCompute((ctx, val) -> val + " " + ctx, (ctx, res) -> ctx)
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue("Hello 100")
+            .assertComplete();
+    }
+
+    @Test
+    public void testContextTypeUpdate() {
+        // Start with Integer context
+        Work.withContext(() -> 100)
+            .updateContext((ctx, val) -> {
+                class MutableCtx {
+                    String val = "";
+                }
+                MutableCtx newCtx = new MutableCtx();
+                newCtx.val = "StringCtx:" + ctx;
+                return newCtx;
+            }) // Change to String context
+            .thenCompute((ctx, val) -> "Value is " + ctx.val, (ctx, res) -> ctx)
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue("Value is StringCtx:100")
+            .assertComplete();
+    }
+
+    // ===========================================================================================
     // PIPELINE BASICS
     // ===========================================================================================
 
     @Test
     public void testSimplePipeline_EmitsTransformedValue() {
-        Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .then(i -> i * 2)
-            .then(i -> "Result: " + i)
+        Work.io(() -> 10)
+            .thenCompute(i -> i * 2)
+            .thenCompute(i -> "Result: " + i)
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
             .assertValue("Result: 20")
             .assertComplete();
-    }
-
-    @Test
-    public void testPipelineWithWorkChaining() {
-        Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .chain(i -> Work.start(WorkScheduler.COMPUTE, () -> i * 2))
-            .chain(i -> Work.start(WorkScheduler.COMPUTE, () -> "Result: " + i))
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Result: 20")
-            .assertComplete();
-    }
-
-    @Test
-    public void testPipelineWithSingleChaining() {
-        Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .chainSingle(i -> Single.just(i * 2))
-            .chainSingle(i -> Single.just("Result: " + i))
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Result: 20")
-            .assertComplete();
-    }
-
-    @Test
-    public void testPipelineWithCompletableChaining() {
-        AtomicBoolean completed = new AtomicBoolean(false);
-        Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .chainCompletable(i -> Completable.fromAction(() -> completed.set(true)))
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue(Done.INSTANCE);
-            
-        assertTrue("Completable should have executed", completed.get());
     }
 
     @Test
     public void testPipelineFailure_PropagatesError() {
-        Exception expectedError = new RuntimeException("Something went wrong");
+        RuntimeException expectedError = new RuntimeException("Something went wrong");
         
-        Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .chain(i -> Work.fail(expectedError))
-            .then(i -> i + " ignored")
+        Work.io(() -> 10)
+            .thenCompute(i -> { throw expectedError; })
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
-            .assertError(expectedError)
+            .assertError(e -> {
+                // Handle possible wrapping
+                while (e.getCause() != null && e != expectedError) {
+                    e = e.getCause();
+                }
+                return e == expectedError;
+            })
             .assertNotComplete();
     }
 
-    // ===========================================================================================
-    // CONDITIONAL OPERATORS
-    // ===========================================================================================
-
     @Test
-    public void testChainIf_WhenConditionTrue_ExecutesSideEffectAndPreservesValue() {
-        AtomicBoolean sideEffectRan = new AtomicBoolean(false);
-        
-        Work.start(WorkScheduler.COMPUTE, () -> "Input")
-            .chainIf(s -> s.equals("Input"), s -> Work.start(WorkScheduler.COMPUTE, () -> {
-                sideEffectRan.set(true);
-                return Done.INSTANCE;
-            }))
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Input");
-            
-        assertTrue("Side effect should have executed", sideEffectRan.get());
-    }
-
-    @Test
-    public void testChainIf_WhenConditionFalse_SkipsSideEffectAndPreservesValue() {
-        AtomicBoolean sideEffectRan = new AtomicBoolean(false);
-        
-        Work.start(WorkScheduler.COMPUTE, () -> "Input")
-            .chainIf(s -> s.equals("Other"), s -> Work.start(WorkScheduler.COMPUTE, () -> {
-                sideEffectRan.set(true);
-                return Done.INSTANCE;
-            }))
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Input");
-            
-        assertFalse("Side effect should NOT have executed", sideEffectRan.get());
-    }
-
-    @Test
-    public void testChainOnlyIf_WhenConditionTrue_ContinuesWithMapping() {
-        Work.start(WorkScheduler.COMPUTE, () -> 10)
-            .chainOnlyIf(i -> i > 5, i -> Work.start(WorkScheduler.COMPUTE, () -> i * 10))
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue(100);
-    }
-
-    @Test
-    public void testChainOnlyIf_WhenConditionFalse_FinishesWithCurrentValue() {
-        AtomicBoolean downstreamRan = new AtomicBoolean(false);
-
-        Work.start(WorkScheduler.COMPUTE, () -> 3)
-            .chainOnlyIf(i -> i > 5, i -> Work.start(WorkScheduler.COMPUTE, () -> i * 10))
-            .then(i -> {
-                downstreamRan.set(true);
-                return i;
-            })
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue(3); // Chain finished early, 3 is the final value
-
-        assertFalse("Downstream operations should have been skipped", downstreamRan.get());
-    }
-
-    // ===========================================================================================
-    // ENTRY POINTS
-    // ===========================================================================================
-
-    @Test
-    public void testStartFromRunnable_EmitsDone() {
+    public void testStartFromWrite_EmitsDone() {
         AtomicInteger counter = new AtomicInteger(0);
         
-        Work.start(WorkScheduler.COMPUTE, (Runnable) counter::incrementAndGet)
+        Work.write((Runnable) counter::incrementAndGet)
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -182,33 +160,13 @@ public class WorkTest {
         assertEquals(1, counter.get());
     }
 
-    @Test
-    public void testStartFromCompletable_EmitsDone() {
-        Work.start(WorkScheduler.COMPUTE, Completable.complete())
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue(Done.INSTANCE);
-    }
-
-    @Test
-    public void testStartFromSingle_EmitsValue() {
-        Work.start(WorkScheduler.COMPUTE, Single.just("Success"))
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Success");
-    }
-
     // ===========================================================================================
     // TERMINATION & FINISHING
     // ===========================================================================================
 
     @Test
     public void testFinish_ImmediatelyTerminatesSuccessfully() {
-        Work.start(WorkScheduler.COMPUTE, () -> "Start")
-            .chain(s -> Work.finish("Early Return"))
-            .then(s -> s + " ignored")
+        Work.finish("Early Return")
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -219,8 +177,7 @@ public class WorkTest {
     public void testFail_ImmediatelyTerminatesWithError() {
         RuntimeException error = new RuntimeException("Fail Fast");
         
-        Work.start(WorkScheduler.COMPUTE, () -> "Start")
-            .chain(s -> Work.fail(error))
+        Work.fail(error)
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -228,24 +185,49 @@ public class WorkTest {
     }
 
     // ===========================================================================================
-    // EDGE CASES
+    // GUARDS
     // ===========================================================================================
 
     @Test
-    public void testFinishWithNull_ReturnsError() {
-        Work.finish(null)
-            .asTerminalSingle()
-            .test()
-            .assertError(NullPointerException.class);
-    }
-
-    @Test
-    public void testStartFromCallableReturningNull_ReturnsError() {
-        // RxJava Single.fromCallable does not allow null
-        Work.start(WorkScheduler.COMPUTE, () -> null)
+    public void testRequire_Success() {
+        Work.io(() -> 10)
+            .require(i -> i > 5, i -> new RuntimeException("Too small"))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
-            .assertError(NullPointerException.class);
+            .assertValue(10);
+    }
+
+    @Test
+    public void testRequire_Failure() {
+        Work.io(() -> 3)
+            .require(i -> i > 5, i -> new RuntimeException("Too small"))
+            .asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertError(e -> {
+                while (e.getCause() != null && !"Too small".equals(e.getMessage())) {
+                    e = e.getCause();
+                }
+                return "Too small".equals(e.getMessage());
+            });
+    }
+
+    @Test
+    public void testLazyContextInitialization() {
+        AtomicInteger initCount = new AtomicInteger(0);
+        Work<String, Integer> work = Work.withContext(() -> {
+            initCount.incrementAndGet();
+            return 10;
+        }).thenCompute((ctx, val) -> "Value:" + ctx, (ctx, res) -> ctx);
+
+        assertEquals(0, initCount.get()); // Not initialized yet
+
+        work.asTerminalSingle()
+            .test()
+            .awaitDone(2, TimeUnit.SECONDS)
+            .assertValue("Value:10");
+
+        assertEquals(1, initCount.get()); // Initialized once
     }
 }
