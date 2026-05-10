@@ -17,11 +17,15 @@ final class PipelineCompiler {
 
     @SuppressWarnings("unchecked")
     static <T> Single<T> compile(List<PipelineStage> stages, Supplier<Object> initialContextSupplier) {
+        return compileInternal(stages, initialContextSupplier).map(res -> (T) res.value());
+    }
+
+    static Single<PipelineResult<Object>> compileInternal(List<PipelineStage> stages, Supplier<Object> initialContextSupplier) {
         if (stages == null || stages.isEmpty()) {
-            return (Single<T>) Single.fromCallable(() -> {
+            return Single.fromCallable(() -> {
                 Object initialContext = initialContextSupplier.get();
                 return PipelineResult.of(Done.INSTANCE, initialContext);
-            }).map(PipelineResult::value);
+            });
         }
 
         Single<PipelineResult<Object>> chain = null;
@@ -34,7 +38,7 @@ final class PipelineCompiler {
             }
         }
 
-        return chain.map(res -> (T) res.value());
+        return chain;
     }
 
     private static Single<PipelineResult<Object>> initializeChain(PipelineStage stage, Supplier<Object> initialContextSupplier) {
@@ -80,6 +84,47 @@ final class PipelineCompiler {
             });
         } else if (stage instanceof PipelineStage.FailStage s) {
             return Single.error(s.error());
+        } else if (stage instanceof PipelineStage.AsyncReadStage s) {
+            return Single.defer(() -> {
+                Object initialContext = initialContextSupplier.get();
+                return s.task().apply(initialContext, null)
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ))
+                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
+            });
+        } else if (stage instanceof PipelineStage.AsyncWriteStage s) {
+            return Single.defer(() -> {
+                Object initialContext = initialContextSupplier.get();
+                return s.task().apply(initialContext, null)
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE))
+                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
+            });
+        } else if (stage instanceof PipelineStage.AsyncIoStage s) {
+            return Single.defer(() -> {
+                Object initialContext = initialContextSupplier.get();
+                return s.task().apply(initialContext, null)
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.IO))
+                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
+            });
+        } else if (stage instanceof PipelineStage.AsyncComputeStage s) {
+            return Single.defer(() -> {
+                Object initialContext = initialContextSupplier.get();
+                return s.task().apply(initialContext, Done.INSTANCE)
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE))
+                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
+            });
+        } else if (stage instanceof PipelineStage.AsyncMainStage s) {
+            return Single.defer(() -> {
+                Object initialContext = initialContextSupplier.get();
+                return s.task().apply(initialContext, Done.INSTANCE)
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.MAIN))
+                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
+            });
+        } else if (stage instanceof PipelineStage.ChainStage s) {
+            return Single.defer(() -> {
+                Object initialContext = initialContextSupplier.get();
+                Work<?, ?> subWork = s.task().apply(initialContext, Done.INSTANCE);
+                return compileInternal(subWork.getStages(), () -> initialContext);
+            });
         } else {
             return Single.error(new IllegalStateException("Invalid entry stage type: " + stage.getClass().getName()));
         }
@@ -120,6 +165,42 @@ final class PipelineCompiler {
             return chain.map(prev -> new PipelineResult<>(s.value(), prev.context(), prev.compensationStack()));
         } else if (stage instanceof PipelineStage.FailStage s) {
             return chain.flatMap(ignored -> Single.error(s.error()));
+        } else if (stage instanceof PipelineStage.AsyncReadStage s) {
+            return chain.flatMap(prev -> 
+                s.task().apply(prev.context(), prev.value())
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ))
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
+            );
+        } else if (stage instanceof PipelineStage.AsyncWriteStage s) {
+            return chain.flatMap(prev -> 
+                s.task().apply(prev.context(), prev.value())
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE))
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
+            );
+        } else if (stage instanceof PipelineStage.AsyncIoStage s) {
+            return chain.flatMap(prev -> 
+                s.task().apply(prev.context(), prev.value())
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.IO))
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
+            );
+        } else if (stage instanceof PipelineStage.AsyncComputeStage s) {
+            return chain.flatMap(prev -> 
+                s.task().apply(prev.context(), prev.value())
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE))
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
+            );
+        } else if (stage instanceof PipelineStage.AsyncMainStage s) {
+            return chain.flatMap(prev -> 
+                s.task().apply(prev.context(), prev.value())
+                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.MAIN))
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
+            );
+        } else if (stage instanceof PipelineStage.ChainStage s) {
+            return chain.flatMap(prev -> {
+                Work<?, ?> subWork = s.task().apply(prev.context(), prev.value());
+                return compileInternal(subWork.getStages(), prev::context)
+                    .map(subRes -> subRes.mergeCompensations(prev.compensationStack()));
+            });
         } else {
             return chain.flatMap(ignored -> Single.error(new IllegalStateException("Unknown stage type: " + stage.getClass().getName())));
         }

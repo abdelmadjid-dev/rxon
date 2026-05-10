@@ -52,4 +52,11 @@ record PipelineResult<T>(
         newStack.add(0, compensation); // LIFO
         return new PipelineResult<>(value, context, Collections.unmodifiableList(newStack));
     }
+
+    PipelineResult<T> mergeCompensations(List<Work<Done, ?>> otherStack) {
+        if (otherStack.isEmpty()) return this;
+        List<Work<Done, ?>> newStack = new ArrayList<>(otherStack);
+        newStack.addAll(compensationStack);
+        return new PipelineResult<>(value, context, Collections.unmodifiableList(newStack));
+    }
 }

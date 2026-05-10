@@ -14,6 +14,12 @@ sealed interface PipelineStage permits
     PipelineStage.IoStage,
     PipelineStage.ComputeStage,
     PipelineStage.MainStage,
+    PipelineStage.AsyncReadStage,
+    PipelineStage.AsyncWriteStage,
+    PipelineStage.AsyncIoStage,
+    PipelineStage.AsyncComputeStage,
+    PipelineStage.AsyncMainStage,
+    PipelineStage.ChainStage,
     PipelineStage.FinishStage,
     PipelineStage.FailStage {
 
@@ -66,6 +72,65 @@ sealed interface PipelineStage permits
     ) implements PipelineStage {
         MainStage(BiConsumer<Object, Object> task, BiFunction<Object, Object, Object> contextMapper) {
             this(task, contextMapper, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+    }
+
+    record AsyncReadStage(
+        BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task,
+        BiFunction<Object, Object, Object> contextMapper,
+        ResiliencePolicy.ResilienceMetadata resilience
+    ) implements PipelineStage {
+        AsyncReadStage(BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task, BiFunction<Object, Object, Object> contextMapper) {
+            this(task, contextMapper, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+    }
+
+    record AsyncWriteStage(
+        BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task,
+        BiFunction<Object, Object, Object> contextMapper,
+        ResiliencePolicy.ResilienceMetadata resilience
+    ) implements PipelineStage {
+        AsyncWriteStage(BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task, BiFunction<Object, Object, Object> contextMapper) {
+            this(task, contextMapper, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+    }
+
+    record AsyncIoStage(
+        BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task,
+        BiFunction<Object, Object, Object> contextMapper,
+        ResiliencePolicy.ResilienceMetadata resilience
+    ) implements PipelineStage {
+        AsyncIoStage(BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task, BiFunction<Object, Object, Object> contextMapper) {
+            this(task, contextMapper, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+    }
+
+    record AsyncComputeStage(
+        BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task,
+        BiFunction<Object, Object, Object> contextMapper,
+        ResiliencePolicy.ResilienceMetadata resilience
+    ) implements PipelineStage {
+        AsyncComputeStage(BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task, BiFunction<Object, Object, Object> contextMapper) {
+            this(task, contextMapper, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+    }
+
+    record AsyncMainStage(
+        BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task,
+        BiFunction<Object, Object, Object> contextMapper,
+        ResiliencePolicy.ResilienceMetadata resilience
+    ) implements PipelineStage {
+        AsyncMainStage(BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task, BiFunction<Object, Object, Object> contextMapper) {
+            this(task, contextMapper, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+    }
+
+    record ChainStage(
+        BiFunction<Object, Object, Work<?, ?>> task,
+        ResiliencePolicy.ResilienceMetadata resilience
+    ) implements PipelineStage {
+        ChainStage(BiFunction<Object, Object, Work<?, ?>> task) {
+            this(task, ResiliencePolicy.ResilienceMetadata.EMPTY);
         }
     }
 

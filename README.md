@@ -5,8 +5,10 @@ RxOn is a semantic DSL wrapper for RxJava 3 that enforces architectural patterns
 ## Core Features
 * **Lazy Orchestration**: Pipelines are declarative blueprints; execution is deferred until a terminal operator is invoked.
 * **Thread Isolation**: Operations explicitly define execution context via `WorkScheduler` (e.g., `.thenIo()`, `.thenCompute()`).
-* **Zero-Nesting Architecture**: Flat API structure for branching, error handling, and asynchronous composition.
-* **Null Safety**: immediate failure upon null emission in any stage of the pipeline.
+* **Zero-Nesting Architecture**: Flat API structure for branching, error handling, and asynchronous composition via `thenChain()` and `then()`.
+* **Async Integration**: First-class support for `Single`-returning tasks across all schedulers using `then<Stage>Single()`.
+* **Semantic Side-Effects**: Overloaded `peek<Stage>(Consumer<T>)` operators for all schedulers to define side-effects without context ceremony.
+* **Zero Nullability**: immediate failure upon null emission in any stage of the pipeline.
 * **Functional Context**: Typed context propagation between isolated pipeline stages.
 
 ## Installation
@@ -14,7 +16,7 @@ RxOn is a semantic DSL wrapper for RxJava 3 that enforces architectural patterns
 ### Gradle
 ```kotlin
 dependencies {
-    implementation("com.benaether:rxon:0.3.0-alpha")
+    implementation("com.benaether:rxon:0.3.0-alpha2")
 }
 ```
 
@@ -23,7 +25,8 @@ dependencies {
 ### Changelogs
 | Version | Documentation | Description |
 | :--- | :--- | :--- |
-| **v0.3.0-alpha** | [Release Notes](changelogs/v0.3.0-alpha.md) | Lazy orchestration engine, functional context, and component renames. |
+| **v0.3.0-alpha2** | [Release Notes](changelogs/v0.3.0-alpha2.md) | Async composition and non-blocking integration operators. |
+| **v0.3.0-alpha** | [Release Notes](changelogs/v0.3.0-alpha.md) | Lazy orchestration engine and functional context. |
 | **v0.2.2** | [Release Notes](changelogs/v0.2.2.md) | Sync/async chaining disambiguation. |
 | **v0.2.1** | [Release Notes](changelogs/v0.2.1.md) | Unified chaining and Throwable support. |
 | **v0.2.0** | [Release Notes](changelogs/v0.2.0.md) | Semantic DSL and pipeline API. |
@@ -31,6 +34,7 @@ dependencies {
 ### Migration Guides
 | From -> To | Guide | Description |
 | :--- | :--- | :--- |
+| **v0.3.0-alpha -> v0.3.0-alpha2** | [Migration Guide](migrations/MIGRATION_0.3.0-alpha_TO_0.3.0-alpha2.md) | Adopting non-blocking async and pipeline composition. |
 | **v0.2.2 -> v0.3.0-alpha** | [Migration Guide](migrations/MIGRATION_0.2.2_TO_0.3.0-alpha.md) | Lazy pipelines and API refactoring. |
 
 ## Initialization
@@ -51,7 +55,8 @@ RxOnConfig.builder()
 
 ### Lazy Pipeline
 ```java
-Work.io(() -> repository.getUser(id))
+Work.io(() -> id)
+    .thenIoSingle(id -> repository.getUserAsync(id)) // Returns Single<User>
     .thenCompute(user -> transform(user))
     .thenWrite(user -> repository.save(user))
     .executeOn(WorkScheduler.MAIN, 
