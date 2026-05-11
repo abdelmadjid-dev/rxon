@@ -41,5 +41,24 @@ public class DefaultRxOnLogger implements RxOnLogger {
     public void d(String tag, String msg) {
         System.out.println("[" + tag + "] DEBUG: " + msg);
     }
-}
 
+    @Override
+    public void onStageStart(String tag, int index, String desc) {
+        System.out.println("[RxOn:" + tag + "] STAGE START [" + index + "]: " + desc);
+    }
+
+    @Override
+    public void onStageEnd(String tag, int index, String desc, long durationMs) {
+        System.out.println("[RxOn:" + tag + "] STAGE END [" + index + "]: " + desc + " (" + durationMs + "ms)");
+    }
+
+    @Override
+    public void onPipelineFinish(String tag, long totalDurationMs) {
+        System.out.println("[RxOn:" + tag + "] PIPELINE FINISHED (" + totalDurationMs + "ms)");
+    }
+
+    @Override
+    public void onPipelineError(String tag, Throwable error, long totalDurationMs) {
+        System.err.println("[RxOn:" + tag + "] PIPELINE FAILED after " + totalDurationMs + "ms: " + error.getMessage());
+    }
+}

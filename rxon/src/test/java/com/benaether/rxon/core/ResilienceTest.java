@@ -1,8 +1,8 @@
 package com.benaether.rxon.core;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
+import com.benaether.rxon.schedulers.WorkScheduler;
 import com.benaether.rxon.scopes.Done;
 
 import org.junit.Before;
@@ -10,8 +10,6 @@ import org.junit.Test;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import io.reactivex.rxjava3.observers.TestObserver;
 
 public class ResilienceTest {
 
@@ -26,7 +24,7 @@ public class ResilienceTest {
 
     @Test
     public void testTimeout_TerminatesStage() {
-        Work.io(() -> {
+        Work.callable(WorkScheduler.IO, () -> {
             Thread.sleep(500);
             return "Done";
         })
@@ -41,7 +39,7 @@ public class ResilienceTest {
     public void testRetry_WithLinearBackoff() {
         AtomicInteger attempts = new AtomicInteger(0);
         
-        Work.io(() -> {
+        Work.callable(WorkScheduler.IO, () -> {
             attempts.incrementAndGet();
             throw new RuntimeException("Fail");
         })
@@ -59,7 +57,7 @@ public class ResilienceTest {
     public void testRetry_SuccessAfterRetry() {
         AtomicInteger attempts = new AtomicInteger(0);
         
-        Work.io(() -> {
+        Work.callable(WorkScheduler.IO, () -> {
             if (attempts.incrementAndGet() < 2) {
                 throw new RuntimeException("Fail");
             }
@@ -76,10 +74,10 @@ public class ResilienceTest {
 
     @Test
     public void testFallback_SwitchesOnFailure() {
-        Work.io(() -> {
+        Work.callable(WorkScheduler.IO, () -> {
             throw new RuntimeException("Primary Fail");
         })
-        .fallback(Work.finish("Fallback Success"))
+        .fallback(Work.breakWork("Fallback Success"))
         .asTerminalSingle()
         .test()
         .awaitDone(2, TimeUnit.SECONDS)
@@ -89,11 +87,11 @@ public class ResilienceTest {
     @Test
     public void testCompensationRegistration_SuccessFlow() {
         AtomicInteger compCounter = new AtomicInteger(0);
-        Work<Done, Object> compensation = Work.write((Runnable) compCounter::incrementAndGet);
+        Work<Done, Object> compensation = Work.action(WorkScheduler.DATA_WRITE, (Runnable) compCounter::incrementAndGet);
 
-        Work.io(() -> "Step 1")
+        Work.callable(WorkScheduler.IO, () -> "Step 1")
             .compensate(compensation)
-            .thenCompute(s -> s + " -> Step 2")
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, s) -> s + " -> Step 2")
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)

@@ -4,20 +4,19 @@ RxOn is a semantic DSL wrapper for RxJava 3 that enforces architectural patterns
 
 ## Core Features
 * **Lazy Orchestration**: Pipelines are declarative blueprints; execution is deferred until a terminal operator is invoked.
-* **Thread Isolation**: Operations explicitly define execution context via `WorkScheduler` (e.g., `.thenIo()`, `.thenCompute()`).
-* **Zero-Nesting Architecture**: Flat API structure for branching, error handling, and asynchronous composition via `thenChain()` and `then()`.
-* **Async Integration**: First-class support for `Single`-returning tasks across all schedulers using `then<Stage>Single()`.
-* **Semantic Side-Effects**: Overloaded `peek<Stage>(Consumer<T>)` operators for all schedulers to define side-effects without context ceremony.
-* **Zero Nullability**: immediate failure upon null emission in any stage of the pipeline.
-* **Functional Context**: Typed context propagation between isolated pipeline stages.
-* **Flow Control & SAGA**: Semantic pipeline termination (`breakWork`), recovery (`recoverBreak`), and reliable LIFO compensations (`compensate`) for transactional integrity.
+* **Explicit Scheduler Injection**: All operations explicitly define execution context via `WorkScheduler` (e.g., `Work.callable(WorkScheduler.IO, ...)`).
+* **Zero-Nesting Architecture**: Flat API structure for branching, error handling, and asynchronous composition via `thenChain()`, `breakIf()`, and `zipWith()`.
+* **Streaming Parity**: The `Observe` class (formerly `Stream`) provides a lazy orchestration engine for streaming data with full functional symmetry to `Work`.
+* **First-Class Resilience**: Native support for `retry`, `timeout`, `fallback`, and SAGA-style `compensate` operators.
+* **Deep Recovery**: Advanced `recover` operators that traverse cause chains to catch specific errors even when wrapped.
+* **Debugging Infrastructure**: Built-in `tag(String)` and `log(LogLevel)` operators with automated lifecycle logging for easier pipeline tracing.
 
 ## Installation
 
 ### Gradle
 ```kotlin
 dependencies {
-    implementation("com.benaether:rxon:0.3.0-alpha3")
+    implementation("com.benaether:rxon:0.3.0-alpha4")
 }
 ```
 
@@ -26,6 +25,7 @@ dependencies {
 ### Changelogs
 | Version | Documentation | Description |
 | :--- | :--- | :--- |
+| **v0.3.0-alpha4** | [Release Notes](changelogs/v0.3.0-alpha4.md) | Explicit naming symmetry, lazy Observe parity, and logging infrastructure. |
 | **v0.3.0-alpha3** | [Release Notes](changelogs/v0.3.0-alpha3.md) | Semantic flow control, SAGA rollback support, and pipeline recovery. |
 | **v0.3.0-alpha2** | [Release Notes](changelogs/v0.3.0-alpha2.md) | Async composition and non-blocking integration operators. |
 | **v0.3.0-alpha** | [Release Notes](changelogs/v0.3.0-alpha.md) | Lazy orchestration engine and functional context. |
@@ -36,54 +36,43 @@ dependencies {
 ### Migration Guides
 | From -> To | Guide | Description |
 | :--- | :--- | :--- |
+| **v0.3.0-alpha3 -> v0.3.0-alpha4** | [Migration Guide](migrations/MIGRATION_0.3.0-alpha3_TO_0.3.0-alpha4.md) | Transitioning to param-based naming and lazy Observe. |
 | **v0.3.0-alpha2 -> v0.3.0-alpha3** | [Migration Guide](migrations/MIGRATION_0.3.0-alpha2_TO_0.3.0-alpha3.md) | Adopting semantic breaks and pipeline recovery. |
-| **v0.3.0-alpha -> v0.3.0-alpha2** | [Migration Guide](migrations/MIGRATION_0.3.0-alpha_TO_0.3.0-alpha2.md) | Adopting non-blocking async and pipeline composition. |
-| **v0.2.2 -> v0.3.0-alpha** | [Migration Guide](migrations/MIGRATION_0.2.2_TO_0.3.0-alpha.md) | Lazy pipelines and API refactoring. |
-
-## Initialization
-
-### Android (Automatic)
-Register `RxOnInitializer` in `AndroidManifest.xml`.
-
-### Manual
-```java
-RxOnConfig.builder()
-    .debug(DEBUG)
-    .logger(new MyLogger())
-    .errorMapper(new MyMapper())
-    .init();
-```
 
 ## Quick Start
 
-### Lazy Pipeline
+### Lazy Pipeline (Explicit Naming)
 ```java
-Work.io(() -> id)
-    .thenIoSingle(id -> repository.getUserAsync(id)) // Returns Single<User>
-    .thenCompute(user -> transform(user))
-    .thenWrite(user -> repository.save(user))
+Work.callable(WorkScheduler.IO, () -> id)
+    .thenSingle(WorkScheduler.IO, (ctx, id) -> repository.getUserAsync(id))
+    .thenFunction(WorkScheduler.COMPUTE, (ctx, user) -> transform(user))
+    .thenAction(WorkScheduler.DATA_WRITE, () -> repository.markSync())
+    .tag("UserSync")
+    .log(LogLevel.DEBUG)
     .executeOn(WorkScheduler.MAIN, 
         result -> ui.show(result),
         error -> ui.error(error)
     );
 ```
 
-### Event Orchestration
+### Event Orchestration (Observe)
 ```java
-Observe.flow(uiEvents)
+Observe.flow(WorkScheduler.MAIN, uiEvents)
     .debounce(300, TimeUnit.MILLISECONDS)
+    .distinct()
     .trigger(
         Work.withContext(() -> computeState())
-            .thenIo((ctx, event) -> sendAnalytics(ctx, event))
+            .thenFunction(WorkScheduler.IO, (ctx, event) -> sendAnalytics(ctx, event))
     );
 ```
 
-### Resilience & Compensation
+### Control Flow & Resilience
 ```java
-Work.io(() -> fetchRemoteData())
+Work.callable(WorkScheduler.IO, () -> fetchRemoteData())
+    .breakIf(data -> data.isEmpty(), "No Data Available")
     .retry(3, 1000, ResiliencePolicy.BackoffStrategy.EXPONENTIAL)
-    .fallback(Work.read(() -> fetchLocalCache()))
-    .thenCompute(data -> process(data))
+    .recover(IOException.class, err -> fetchLocalCache())
+    .thenFunction(WorkScheduler.COMPUTE, (ctx, data) -> process(data))
     .execute();
 ```
 

@@ -1,6 +1,7 @@
 package com.benaether.rxon.core;
 
 import com.benaether.rxon.scopes.Done;
+import com.benaether.rxon.schedulers.WorkScheduler;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -24,12 +25,12 @@ public class WorkFinalizationTest {
     }
 
     @Test
-    public void testFinish_MidPipeline_BypassesSubsequentStages() {
+    public void testBreak_MidPipeline_BypassesSubsequentStages() {
         AtomicBoolean subsequentStageRun = new AtomicBoolean(false);
         
-        String result = Work.io(() -> "Step 1")
+        String result = Work.callable(WorkScheduler.IO, () -> "Step 1")
             .thenBreak("Finished Early")
-            .thenCompute(val -> {
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
                 subsequentStageRun.set(true);
                 return val + " -> Step 2";
             })
@@ -45,9 +46,9 @@ public class WorkFinalizationTest {
         AtomicBoolean subsequentStageRun = new AtomicBoolean(false);
         RuntimeException expectedError = new RuntimeException("Forced Failure");
         
-        Work.io(() -> "Step 1")
+        Work.callable(WorkScheduler.IO, () -> "Step 1")
             .then(Work.fail(expectedError))
-            .thenCompute(val -> {
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
                 subsequentStageRun.set(true);
                 return val + " -> Step 2";
             })
@@ -63,12 +64,12 @@ public class WorkFinalizationTest {
     }
 
     @Test
-    public void testFinish_InThenChain_TerminatesPipeline() {
+    public void testBreak_InThenChain_TerminatesPipeline() {
         AtomicBoolean subsequentStageRun = new AtomicBoolean(false);
         
-        String result = Work.io(() -> "Step 1")
+        String result = Work.callable(WorkScheduler.IO, () -> "Step 1")
             .thenChain(val -> Work.breakWork("Finished in Chain"))
-            .thenCompute(val -> {
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
                 subsequentStageRun.set(true);
                 return val + " -> Step 2";
             })
@@ -84,9 +85,9 @@ public class WorkFinalizationTest {
         AtomicBoolean subsequentStageRun = new AtomicBoolean(false);
         RuntimeException expectedError = new RuntimeException("Fail in Chain");
         
-        Work.io(() -> "Step 1")
+        Work.callable(WorkScheduler.IO, () -> "Step 1")
             .thenChain(val -> Work.fail(expectedError))
-            .thenCompute(val -> {
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
                 subsequentStageRun.set(true);
                 return val + " -> Step 2";
             })
@@ -104,9 +105,9 @@ public class WorkFinalizationTest {
     @Test
     public void testCompensation_ExecutionOnFailure() {
         AtomicInteger compensationRunCount = new AtomicInteger(0);
-        Work<Done, Object> compensation = Work.write((Runnable) compensationRunCount::incrementAndGet);
+        Work<Done, Object> compensation = Work.action(WorkScheduler.DATA_WRITE, (Runnable) compensationRunCount::incrementAndGet);
         
-        Work.io(() -> "Action")
+        Work.callable(WorkScheduler.IO, () -> "Action")
             .compensate(compensation)
             .then(Work.fail(new RuntimeException("Trigger Compensation")))
             .asTerminalSingle()
@@ -121,10 +122,10 @@ public class WorkFinalizationTest {
     public void testCompensation_LIFO_Order() {
         java.util.List<Integer> order = new java.util.ArrayList<>();
         
-        Work.io(() -> "Action 1")
-            .compensate(Work.write((Runnable) () -> order.add(1)))
-            .thenCompute(val -> "Action 2")
-            .compensate(Work.write((Runnable) () -> order.add(2)))
+        Work.callable(WorkScheduler.IO, () -> "Action 1")
+            .compensate(Work.action(WorkScheduler.DATA_WRITE, (Runnable) () -> order.add(1)))
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> "Action 2")
+            .compensate(Work.action(WorkScheduler.DATA_WRITE, (Runnable) () -> order.add(2)))
             .then(Work.fail(new RuntimeException("Rollback")))
             .asTerminalSingle()
             .test()
@@ -138,8 +139,8 @@ public class WorkFinalizationTest {
         AtomicInteger contextValue = new AtomicInteger(0);
         
         Work.withContext(() -> 100)
-            .thenCompute(val -> val) // A stage to attach compensation to
-            .compensate(Work.write((Runnable) () -> {}).peekChain((ctx, val) -> {
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val) // A stage to attach compensation to
+            .compensate(Work.action(WorkScheduler.DATA_WRITE, (Runnable) () -> {}).peekChain((ctx, val) -> {
                 contextValue.set((Integer) ctx);
                 return Work.breakWork(Done.INSTANCE);
             }))
@@ -152,12 +153,12 @@ public class WorkFinalizationTest {
     }
 
     @Test
-    public void testFinish_AsyncStage_BypassesSubsequent() {
+    public void testBreak_AsyncStage_BypassesSubsequent() {
         AtomicBoolean subsequentRun = new AtomicBoolean(false);
         
-        Work.io(() -> "Start")
+        Work.callable(WorkScheduler.IO, () -> "Start")
             .thenBreak("Done")
-            .thenIoSingle(val -> {
+            .thenSingle(WorkScheduler.IO, (ctx, val) -> {
                 subsequentRun.set(true);
                 return io.reactivex.rxjava3.core.Single.just("Async");
             })
@@ -180,13 +181,13 @@ public class WorkFinalizationTest {
     public void testBreak_CanBeRecovered() {
         AtomicBoolean postRecoveryRun = new AtomicBoolean(false);
         
-        String result = Work.io(() -> "Start")
+        String result = Work.callable(WorkScheduler.IO, () -> "Start")
             .thenBreak("Broken")
-            .thenCompute(val -> {
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
                 throw new RuntimeException("Should not run");
             })
             .recoverBreak("Recovered")
-            .thenCompute(val -> {
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
                 postRecoveryRun.set(true);
                 return val + " and Continued";
             })
@@ -200,7 +201,7 @@ public class WorkFinalizationTest {
     @Test
     public void testContinueWork() {
         String result = Work.continueWork("Direct Value")
-            .thenCompute(val -> val + "!")
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val + "!")
             .asTerminalSingle()
             .blockingGet();
             
@@ -214,7 +215,7 @@ public class WorkFinalizationTest {
         
         Work.fail(expectedError)
             .recoverBreak("Should not recover")
-            .thenCompute(val -> {
+            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
                 recoveryStageRun.set(true);
                 return val;
             })

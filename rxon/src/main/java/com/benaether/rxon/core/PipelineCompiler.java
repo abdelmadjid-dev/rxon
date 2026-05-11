@@ -1,10 +1,13 @@
 package com.benaether.rxon.core;
 
+import com.benaether.rxon.rx.RxLog;
+import com.benaether.rxon.rx.RxOnLogger;
 import com.benaether.rxon.schedulers.WorkScheduler;
 import com.benaether.rxon.scopes.Done;
 
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicLong;
 
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Single;
@@ -16,11 +19,11 @@ import io.reactivex.rxjava3.core.Single;
 final class PipelineCompiler {
 
     @SuppressWarnings("unchecked")
-    static <T> Single<T> compile(List<PipelineStage> stages, Supplier<Object> initialContextSupplier) {
-        return compileInternal(stages, initialContextSupplier).map(res -> (T) res.value());
+    static <T> Single<T> compile(List<PipelineStage> stages, String tag, Supplier<Object> initialContextSupplier) {
+        return compileInternal(stages, tag, initialContextSupplier).map(res -> (T) res.value());
     }
 
-    static Single<PipelineResult<Object>> compileInternal(List<PipelineStage> stages, Supplier<Object> initialContextSupplier) {
+    static Single<PipelineResult<Object>> compileInternal(List<PipelineStage> stages, String tag, Supplier<Object> initialContextSupplier) {
         if (stages == null || stages.isEmpty()) {
             return Single.fromCallable(() -> {
                 Object initialContext = initialContextSupplier.get();
@@ -28,14 +31,49 @@ final class PipelineCompiler {
             });
         }
 
+        final long pipelineStartTime = System.currentTimeMillis();
         Single<PipelineResult<Object>> chain = null;
 
-        for (PipelineStage stage : stages) {
+        for (int i = 0; i < stages.size(); i++) {
+            PipelineStage stage = stages.get(i);
+            final int stageIndex = i;
+            
+            Single<PipelineResult<Object>> stageSingle;
             if (chain == null) {
-                chain = applyResilience(initializeChain(stage, initialContextSupplier), stage);
+                stageSingle = initializeChain(stage, initialContextSupplier);
             } else {
-                chain = applyResilience(appendToChain(chain, stage), stage);
+                stageSingle = appendToChain(chain, stage);
             }
+
+            // Wrap with logging if debug enabled
+            if (RxOnConfig.isDebug()) {
+                final String stageDesc = stage.toString();
+                final AtomicLong stageStartTime = new AtomicLong();
+                
+                stageSingle = stageSingle
+                    .doOnSubscribe(d -> {
+                        stageStartTime.set(System.currentTimeMillis());
+                        RxOnConfig.getLogger().onStageStart(tag, stageIndex, stageDesc);
+                    })
+                    .doOnSuccess(res -> {
+                        long duration = System.currentTimeMillis() - stageStartTime.get();
+                        RxOnConfig.getLogger().onStageEnd(tag, stageIndex, stageDesc, duration);
+                    });
+            }
+
+            chain = applyResilience(stageSingle, stage);
+        }
+
+        if (RxOnConfig.isDebug()) {
+            chain = chain
+                .doOnSuccess(res -> {
+                    long totalDuration = System.currentTimeMillis() - pipelineStartTime;
+                    RxOnConfig.getLogger().onPipelineFinish(tag, totalDuration);
+                })
+                .doOnError(err -> {
+                    long totalDuration = System.currentTimeMillis() - pipelineStartTime;
+                    RxOnConfig.getLogger().onPipelineError(tag, err, totalDuration);
+                });
         }
 
         return chain.onErrorResumeNext(err -> {
@@ -47,41 +85,20 @@ final class PipelineCompiler {
     }
 
     private static Single<PipelineResult<Object>> initializeChain(PipelineStage stage, Supplier<Object> initialContextSupplier) {
-        if (stage instanceof PipelineStage.ReadStage s) {
-            return Single.fromCallable(() -> {
-                Object initialContext = initialContextSupplier.get();
-                Object res = s.task().apply(initialContext, null);
-                Object nextCtx = s.contextMapper().apply(initialContext, res);
-                return PipelineResult.of(res, nextCtx);
-            }).subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ));
-        } else if (stage instanceof PipelineStage.IoStage s) {
-            return Single.fromCallable(() -> {
-                Object initialContext = initialContextSupplier.get();
-                Object res = s.task().apply(initialContext, null);
-                Object nextCtx = s.contextMapper().apply(initialContext, res);
-                return PipelineResult.of(res, nextCtx);
-            }).subscribeOn(SchedulerResolver.resolve(WorkScheduler.IO));
-        } else if (stage instanceof PipelineStage.WriteStage s) {
-            return Single.fromCallable(() -> {
-                Object initialContext = initialContextSupplier.get();
-                s.task().accept(initialContext, null);
-                Object nextCtx = s.contextMapper().apply(initialContext, null);
-                return PipelineResult.of((Object) Done.INSTANCE, nextCtx);
-            }).subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE));
-        } else if (stage instanceof PipelineStage.ComputeStage s) {
+        if (stage instanceof PipelineStage.SyncStage s) {
             return Single.fromCallable(() -> {
                 Object initialContext = initialContextSupplier.get();
                 Object res = s.task().apply(initialContext, Done.INSTANCE);
                 Object nextCtx = s.contextMapper().apply(initialContext, res);
                 return PipelineResult.of(res, nextCtx);
-            }).subscribeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE));
-        } else if (stage instanceof PipelineStage.MainStage s) {
-            return Single.fromCallable(() -> {
+            }).subscribeOn(SchedulerResolver.resolve(s.scheduler()));
+        } else if (stage instanceof PipelineStage.AsyncStage s) {
+            return Single.defer(() -> {
                 Object initialContext = initialContextSupplier.get();
-                s.task().accept(initialContext, Done.INSTANCE);
-                Object nextCtx = s.contextMapper().apply(initialContext, Done.INSTANCE);
-                return PipelineResult.of((Object) Done.INSTANCE, nextCtx);
-            }).subscribeOn(SchedulerResolver.resolve(WorkScheduler.MAIN));
+                return s.task().apply(initialContext, Done.INSTANCE)
+                    .subscribeOn(SchedulerResolver.resolve(s.scheduler()))
+                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
+            });
         } else if (stage instanceof PipelineStage.BreakStage s) {
             return Single.fromCallable(() -> {
                 Object initialContext = initialContextSupplier.get();
@@ -94,46 +111,28 @@ final class PipelineCompiler {
             });
         } else if (stage instanceof PipelineStage.FailStage s) {
             return Single.error(s.error());
-        } else if (stage instanceof PipelineStage.AsyncReadStage s) {
-            return Single.defer(() -> {
-                Object initialContext = initialContextSupplier.get();
-                return s.task().apply(initialContext, null)
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ))
-                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
-            });
-        } else if (stage instanceof PipelineStage.AsyncWriteStage s) {
-            return Single.defer(() -> {
-                Object initialContext = initialContextSupplier.get();
-                return s.task().apply(initialContext, null)
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE))
-                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
-            });
-        } else if (stage instanceof PipelineStage.AsyncIoStage s) {
-            return Single.defer(() -> {
-                Object initialContext = initialContextSupplier.get();
-                return s.task().apply(initialContext, null)
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.IO))
-                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
-            });
-        } else if (stage instanceof PipelineStage.AsyncComputeStage s) {
-            return Single.defer(() -> {
-                Object initialContext = initialContextSupplier.get();
-                return s.task().apply(initialContext, Done.INSTANCE)
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE))
-                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
-            });
-        } else if (stage instanceof PipelineStage.AsyncMainStage s) {
-            return Single.defer(() -> {
-                Object initialContext = initialContextSupplier.get();
-                return s.task().apply(initialContext, Done.INSTANCE)
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.MAIN))
-                    .map(res -> PipelineResult.of(res, s.contextMapper().apply(initialContext, res)));
-            });
         } else if (stage instanceof PipelineStage.ChainStage s) {
             return Single.defer(() -> {
                 Object initialContext = initialContextSupplier.get();
                 Work<?, ?> subWork = s.task().apply(initialContext, Done.INSTANCE);
-                return compileInternal(subWork.getStages(), () -> initialContext);
+                return compileInternal(subWork.getStages(), subWork.getTag(), () -> initialContext);
+            });
+        } else if (stage instanceof PipelineStage.RecoverStage s) {
+            return Single.fromCallable(() -> {
+                Object initialContext = initialContextSupplier.get();
+                return PipelineResult.of(Done.INSTANCE, initialContext);
+            });
+        } else if (stage instanceof PipelineStage.ZipStage s) {
+            return Single.defer(() -> {
+                Object initialContext = initialContextSupplier.get();
+                return compileInternal(s.other().getStages(), s.other().getTag(), () -> initialContext)
+                    .map(otherRes -> PipelineResult.of(s.zipper().apply(Done.INSTANCE, otherRes.value()), initialContext));
+            });
+        } else if (stage instanceof PipelineStage.LogStage s) {
+            return Single.fromCallable(() -> {
+                Object initialContext = initialContextSupplier.get();
+                logPipelineState("Entry", s, initialContext, Done.INSTANCE);
+                return PipelineResult.of(Done.INSTANCE, initialContext);
             });
         } else {
             return Single.error(new IllegalStateException("Invalid entry stage type: " + stage.getClass().getName()));
@@ -141,8 +140,8 @@ final class PipelineCompiler {
     }
 
     private static Single<PipelineResult<Object>> appendToChain(Single<PipelineResult<Object>> chain, PipelineStage stage) {
-        if (stage instanceof PipelineStage.ReadStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ)).flatMap(prev -> {
+        if (stage instanceof PipelineStage.SyncStage s) {
+            return chain.observeOn(SchedulerResolver.resolve(s.scheduler())).flatMap(prev -> {
                 if (prev.terminated()) return Single.just(prev);
                 try {
                     Object res = s.task().apply(prev.context(), prev.value());
@@ -152,49 +151,13 @@ final class PipelineCompiler {
                     return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
                 }
             });
-        } else if (stage instanceof PipelineStage.IoStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.IO)).flatMap(prev -> {
+        } else if (stage instanceof PipelineStage.AsyncStage s) {
+            return chain.flatMap(prev -> {
                 if (prev.terminated()) return Single.just(prev);
-                try {
-                    Object res = s.task().apply(prev.context(), prev.value());
-                    Object nextCtx = s.contextMapper().apply(prev.context(), res);
-                    return Single.just(new PipelineResult<>(res, nextCtx, prev.compensationStack(), false));
-                } catch (Throwable e) {
-                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
-                }
-            });
-        } else if (stage instanceof PipelineStage.WriteStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE)).flatMap(prev -> {
-                if (prev.terminated()) return Single.just(prev);
-                try {
-                    s.task().accept(prev.context(), prev.value());
-                    Object nextCtx = s.contextMapper().apply(prev.context(), prev.value());
-                    return Single.just(new PipelineResult<>(prev.value(), nextCtx, prev.compensationStack(), false));
-                } catch (Throwable e) {
-                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
-                }
-            });
-        } else if (stage instanceof PipelineStage.ComputeStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE)).flatMap(prev -> {
-                if (prev.terminated()) return Single.just(prev);
-                try {
-                    Object res = s.task().apply(prev.context(), prev.value());
-                    Object nextCtx = s.contextMapper().apply(prev.context(), res);
-                    return Single.just(new PipelineResult<>(res, nextCtx, prev.compensationStack(), false));
-                } catch (Throwable e) {
-                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
-                }
-            });
-        } else if (stage instanceof PipelineStage.MainStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.MAIN)).flatMap(prev -> {
-                if (prev.terminated()) return Single.just(prev);
-                try {
-                    s.task().accept(prev.context(), prev.value());
-                    Object nextCtx = s.contextMapper().apply(prev.context(), prev.value());
-                    return Single.just(new PipelineResult<>(prev.value(), nextCtx, prev.compensationStack(), false));
-                } catch (Throwable e) {
-                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
-                }
+                return s.task().apply(prev.context(), prev.value())
+                    .subscribeOn(SchedulerResolver.resolve(s.scheduler()))
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
+                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
             });
         } else if (stage instanceof PipelineStage.BreakStage s) {
             return chain.map(prev -> {
@@ -213,52 +176,12 @@ final class PipelineCompiler {
                 if (prev.terminated()) return Single.just(prev);
                 return Single.error(new PipelineException(s.error(), prev.context(), prev.compensationStack()));
             });
-        } else if (stage instanceof PipelineStage.AsyncReadStage s) {
-            return chain.flatMap(prev -> {
-                if (prev.terminated()) return Single.just(prev);
-                return s.task().apply(prev.context(), prev.value())
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
-                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
-            });
-        } else if (stage instanceof PipelineStage.AsyncWriteStage s) {
-            return chain.flatMap(prev -> {
-                if (prev.terminated()) return Single.just(prev);
-                return s.task().apply(prev.context(), prev.value())
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
-                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
-            });
-        } else if (stage instanceof PipelineStage.AsyncIoStage s) {
-            return chain.flatMap(prev -> {
-                if (prev.terminated()) return Single.just(prev);
-                return s.task().apply(prev.context(), prev.value())
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.IO))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
-                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
-            });
-        } else if (stage instanceof PipelineStage.AsyncComputeStage s) {
-            return chain.flatMap(prev -> {
-                if (prev.terminated()) return Single.just(prev);
-                return s.task().apply(prev.context(), prev.value())
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
-                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
-            });
-        } else if (stage instanceof PipelineStage.AsyncMainStage s) {
-            return chain.flatMap(prev -> {
-                if (prev.terminated()) return Single.just(prev);
-                return s.task().apply(prev.context(), prev.value())
-                    .subscribeOn(SchedulerResolver.resolve(WorkScheduler.MAIN))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
-                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
-            });
         } else if (stage instanceof PipelineStage.ChainStage s) {
             return chain.flatMap(prev -> {
                 if (prev.terminated()) return Single.just(prev);
                 try {
                     Work<?, ?> subWork = s.task().apply(prev.context(), prev.value());
-                    return compileInternal(subWork.getStages(), prev::context)
+                    return compileInternal(subWork.getStages(), subWork.getTag(), prev::context)
                         .map(subRes -> subRes.mergeCompensations(prev.compensationStack()))
                         .onErrorResumeNext(e -> {
                             if (e instanceof PipelineException) return Single.error(e);
@@ -268,8 +191,86 @@ final class PipelineCompiler {
                     return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
                 }
             });
+        } else if (stage instanceof PipelineStage.RecoverStage s) {
+            return chain.onErrorResumeNext(err -> {
+                Throwable root = err instanceof PipelineException pe ? pe.getCause() : err;
+                Throwable match = null;
+                Throwable current = root;
+                while (current != null) {
+                    if (s.type().isInstance(current)) {
+                        match = current;
+                        break;
+                    }
+                    if (current == current.getCause()) break;
+                    current = current.getCause();
+                }
+
+                if (match != null) {
+                    Object context = err instanceof PipelineException pe ? pe.getContext() : null;
+                    List<Work<Done, ?>> stack = err instanceof PipelineException pe ? pe.getCompensationStack() : java.util.Collections.emptyList();
+                    try {
+                        Object recoveredValue = s.fallback().apply(match);
+                        return Single.just(new PipelineResult<>(recoveredValue, context, stack, false));
+                    } catch (Throwable e) {
+                        return Single.error(new PipelineException(e, context, stack));
+                    }
+                }
+                return Single.error(err);
+            });
+        } else if (stage instanceof PipelineStage.ConditionalBreakStage s) {
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                try {
+                    if (s.condition().test(prev.value())) {
+                        return Single.just(PipelineResult.terminated(s.defaultValue(), prev.context(), prev.compensationStack()));
+                    }
+                    return Single.just(prev);
+                } catch (Throwable e) {
+                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                }
+            });
+        } else if (stage instanceof PipelineStage.ConditionalFailStage s) {
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                try {
+                    if (s.condition().test(prev.value())) {
+                        return Single.error(new PipelineException(s.error(), prev.context(), prev.compensationStack()));
+                    }
+                    return Single.just(prev);
+                } catch (Throwable e) {
+                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                }
+            });
+        } else if (stage instanceof PipelineStage.ZipStage s) {
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                return compileInternal(s.other().getStages(), s.other().getTag(), prev::context)
+                    .map(otherRes -> {
+                        Object combined = s.zipper().apply(prev.value(), otherRes.value());
+                        return new PipelineResult<>(combined, prev.context(), prev.compensationStack(), false);
+                    })
+                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
+            });
+        } else if (stage instanceof PipelineStage.LogStage s) {
+            return chain.map(prev -> {
+                if (prev.terminated()) return prev;
+                logPipelineState("Step", s, prev.context(), prev.value());
+                return prev;
+            });
         } else {
             return chain.flatMap(ignored -> Single.error(new IllegalStateException("Unknown stage type: " + stage.getClass().getName())));
+        }
+    }
+
+    private static void logPipelineState(String source, PipelineStage.LogStage s, Object context, Object value) {
+        String msg = (s.message() != null ? s.message() + " | " : "") + 
+                     "Value: " + value + " | Context: " + context;
+        RxOnLogger logger = RxOnConfig.getLogger();
+        switch (s.level()) {
+            case DEBUG -> logger.d("RxOn:" + source, msg);
+            case INFO -> logger.i("RxOn:" + source, msg);
+            case WARN -> logger.w("RxOn:" + source, msg, null);
+            case ERROR -> logger.e("RxOn:" + source, msg, null);
         }
     }
 
@@ -329,7 +330,7 @@ final class PipelineCompiler {
         List<Work<Done, ?>> mutableStack = new java.util.ArrayList<>(stack);
         Work<Done, ?> compensation = mutableStack.remove(0);
 
-        return compileInternal(compensation.getStages(), () -> context)
+        return compileInternal(compensation.getStages(), compensation.getTag(), () -> context)
             .onErrorReturnItem(PipelineResult.of(com.benaether.rxon.scopes.Done.INSTANCE, context)) // SAGA: Ignore compensation failures
             .flatMap(ignored -> runCompensations(mutableStack, context, originalError));
     }

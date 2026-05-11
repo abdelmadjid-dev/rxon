@@ -49,5 +49,26 @@ public interface RxOnLogger {
      * @param message message
      */
     void d(String tag, String message);
-}
 
+    // Pipeline Lifecycle Hooks
+
+    /**
+     * Called when a pipeline stage starts.
+     */
+    default void onStageStart(String tag, int stageIndex, String stageDescription) {}
+
+    /**
+     * Called when a pipeline stage ends successfully.
+     */
+    default void onStageEnd(String tag, int stageIndex, String stageDescription, long durationMs) {}
+
+    /**
+     * Called when a pipeline finishes successfully.
+     */
+    default void onPipelineFinish(String tag, long totalDurationMs) {}
+
+    /**
+     * Called when a pipeline fails.
+     */
+    default void onPipelineError(String tag, Throwable error, long totalDurationMs) {}
+}
