@@ -38,7 +38,12 @@ final class PipelineCompiler {
             }
         }
 
-        return chain;
+        return chain.onErrorResumeNext(err -> {
+            if (err instanceof PipelineException pe) {
+                return runCompensations(pe.getCompensationStack(), pe.getContext(), pe.getCause());
+            }
+            return Single.error(err);
+        });
     }
 
     private static Single<PipelineResult<Object>> initializeChain(PipelineStage stage, Supplier<Object> initialContextSupplier) {
@@ -77,7 +82,12 @@ final class PipelineCompiler {
                 Object nextCtx = s.contextMapper().apply(initialContext, Done.INSTANCE);
                 return PipelineResult.of((Object) Done.INSTANCE, nextCtx);
             }).subscribeOn(SchedulerResolver.resolve(WorkScheduler.MAIN));
-        } else if (stage instanceof PipelineStage.FinishStage s) {
+        } else if (stage instanceof PipelineStage.BreakStage s) {
+            return Single.fromCallable(() -> {
+                Object initialContext = initialContextSupplier.get();
+                return PipelineResult.terminated(s.value(), initialContext, java.util.Collections.emptyList());
+            });
+        } else if (stage instanceof PipelineStage.RecoverBreakStage s) {
             return Single.fromCallable(() -> {
                 Object initialContext = initialContextSupplier.get();
                 return PipelineResult.of(s.value(), initialContext);
@@ -132,74 +142,131 @@ final class PipelineCompiler {
 
     private static Single<PipelineResult<Object>> appendToChain(Single<PipelineResult<Object>> chain, PipelineStage stage) {
         if (stage instanceof PipelineStage.ReadStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ)).map(prev -> {
-                Object res = s.task().apply(prev.context(), prev.value());
-                Object nextCtx = s.contextMapper().apply(prev.context(), res);
-                return new PipelineResult<>(res, nextCtx, prev.compensationStack());
+            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ)).flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                try {
+                    Object res = s.task().apply(prev.context(), prev.value());
+                    Object nextCtx = s.contextMapper().apply(prev.context(), res);
+                    return Single.just(new PipelineResult<>(res, nextCtx, prev.compensationStack(), false));
+                } catch (Throwable e) {
+                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                }
             });
         } else if (stage instanceof PipelineStage.IoStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.IO)).map(prev -> {
-                Object res = s.task().apply(prev.context(), prev.value());
-                Object nextCtx = s.contextMapper().apply(prev.context(), res);
-                return new PipelineResult<>(res, nextCtx, prev.compensationStack());
+            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.IO)).flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                try {
+                    Object res = s.task().apply(prev.context(), prev.value());
+                    Object nextCtx = s.contextMapper().apply(prev.context(), res);
+                    return Single.just(new PipelineResult<>(res, nextCtx, prev.compensationStack(), false));
+                } catch (Throwable e) {
+                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                }
             });
         } else if (stage instanceof PipelineStage.WriteStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE)).map(prev -> {
-                s.task().accept(prev.context(), prev.value());
-                Object nextCtx = s.contextMapper().apply(prev.context(), prev.value());
-                return new PipelineResult<>(prev.value(), nextCtx, prev.compensationStack());
+            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE)).flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                try {
+                    s.task().accept(prev.context(), prev.value());
+                    Object nextCtx = s.contextMapper().apply(prev.context(), prev.value());
+                    return Single.just(new PipelineResult<>(prev.value(), nextCtx, prev.compensationStack(), false));
+                } catch (Throwable e) {
+                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                }
             });
         } else if (stage instanceof PipelineStage.ComputeStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE)).map(prev -> {
-                Object res = s.task().apply(prev.context(), prev.value());
-                Object nextCtx = s.contextMapper().apply(prev.context(), res);
-                return new PipelineResult<>(res, nextCtx, prev.compensationStack());
+            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE)).flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                try {
+                    Object res = s.task().apply(prev.context(), prev.value());
+                    Object nextCtx = s.contextMapper().apply(prev.context(), res);
+                    return Single.just(new PipelineResult<>(res, nextCtx, prev.compensationStack(), false));
+                } catch (Throwable e) {
+                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                }
             });
         } else if (stage instanceof PipelineStage.MainStage s) {
-            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.MAIN)).map(prev -> {
-                s.task().accept(prev.context(), prev.value());
-                Object nextCtx = s.contextMapper().apply(prev.context(), prev.value());
-                return new PipelineResult<>(prev.value(), nextCtx, prev.compensationStack());
+            return chain.observeOn(SchedulerResolver.resolve(WorkScheduler.MAIN)).flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                try {
+                    s.task().accept(prev.context(), prev.value());
+                    Object nextCtx = s.contextMapper().apply(prev.context(), prev.value());
+                    return Single.just(new PipelineResult<>(prev.value(), nextCtx, prev.compensationStack(), false));
+                } catch (Throwable e) {
+                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                }
             });
-        } else if (stage instanceof PipelineStage.FinishStage s) {
-            return chain.map(prev -> new PipelineResult<>(s.value(), prev.context(), prev.compensationStack()));
+        } else if (stage instanceof PipelineStage.BreakStage s) {
+            return chain.map(prev -> {
+                if (prev.terminated()) return prev;
+                return PipelineResult.terminated(s.value(), prev.context(), prev.compensationStack());
+            });
+        } else if (stage instanceof PipelineStage.RecoverBreakStage s) {
+            return chain.map(prev -> {
+                if (prev.terminated()) {
+                    return new PipelineResult<>(s.value(), prev.context(), prev.compensationStack(), false);
+                }
+                return prev;
+            });
         } else if (stage instanceof PipelineStage.FailStage s) {
-            return chain.flatMap(ignored -> Single.error(s.error()));
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                return Single.error(new PipelineException(s.error(), prev.context(), prev.compensationStack()));
+            });
         } else if (stage instanceof PipelineStage.AsyncReadStage s) {
-            return chain.flatMap(prev -> 
-                s.task().apply(prev.context(), prev.value())
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                return s.task().apply(prev.context(), prev.value())
                     .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_READ))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
-            );
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
+                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
+            });
         } else if (stage instanceof PipelineStage.AsyncWriteStage s) {
-            return chain.flatMap(prev -> 
-                s.task().apply(prev.context(), prev.value())
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                return s.task().apply(prev.context(), prev.value())
                     .subscribeOn(SchedulerResolver.resolve(WorkScheduler.DATA_WRITE))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
-            );
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
+                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
+            });
         } else if (stage instanceof PipelineStage.AsyncIoStage s) {
-            return chain.flatMap(prev -> 
-                s.task().apply(prev.context(), prev.value())
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                return s.task().apply(prev.context(), prev.value())
                     .subscribeOn(SchedulerResolver.resolve(WorkScheduler.IO))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
-            );
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
+                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
+            });
         } else if (stage instanceof PipelineStage.AsyncComputeStage s) {
-            return chain.flatMap(prev -> 
-                s.task().apply(prev.context(), prev.value())
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                return s.task().apply(prev.context(), prev.value())
                     .subscribeOn(SchedulerResolver.resolve(WorkScheduler.COMPUTE))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
-            );
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
+                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
+            });
         } else if (stage instanceof PipelineStage.AsyncMainStage s) {
-            return chain.flatMap(prev -> 
-                s.task().apply(prev.context(), prev.value())
+            return chain.flatMap(prev -> {
+                if (prev.terminated()) return Single.just(prev);
+                return s.task().apply(prev.context(), prev.value())
                     .subscribeOn(SchedulerResolver.resolve(WorkScheduler.MAIN))
-                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack()))
-            );
+                    .map(res -> new PipelineResult<>(res, s.contextMapper().apply(prev.context(), res), prev.compensationStack(), false))
+                    .onErrorResumeNext(e -> Single.error(new PipelineException(e, prev.context(), prev.compensationStack())));
+            });
         } else if (stage instanceof PipelineStage.ChainStage s) {
             return chain.flatMap(prev -> {
-                Work<?, ?> subWork = s.task().apply(prev.context(), prev.value());
-                return compileInternal(subWork.getStages(), prev::context)
-                    .map(subRes -> subRes.mergeCompensations(prev.compensationStack()));
+                if (prev.terminated()) return Single.just(prev);
+                try {
+                    Work<?, ?> subWork = s.task().apply(prev.context(), prev.value());
+                    return compileInternal(subWork.getStages(), prev::context)
+                        .map(subRes -> subRes.mergeCompensations(prev.compensationStack()))
+                        .onErrorResumeNext(e -> {
+                            if (e instanceof PipelineException) return Single.error(e);
+                            return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                        });
+                } catch (Throwable e) {
+                    return Single.error(new PipelineException(e, prev.context(), prev.compensationStack()));
+                }
             });
         } else {
             return chain.flatMap(ignored -> Single.error(new IllegalStateException("Unknown stage type: " + stage.getClass().getName())));
@@ -252,6 +319,19 @@ final class PipelineCompiler {
         });
 
         return current;
+    }
+
+    private static Single<PipelineResult<Object>> runCompensations(List<Work<Done, ?>> stack, Object context, Throwable originalError) {
+        if (stack == null || stack.isEmpty()) {
+            return Single.error(originalError);
+        }
+
+        List<Work<Done, ?>> mutableStack = new java.util.ArrayList<>(stack);
+        Work<Done, ?> compensation = mutableStack.remove(0);
+
+        return compileInternal(compensation.getStages(), () -> context)
+            .onErrorReturnItem(PipelineResult.of(com.benaether.rxon.scopes.Done.INSTANCE, context)) // SAGA: Ignore compensation failures
+            .flatMap(ignored -> runCompensations(mutableStack, context, originalError));
     }
 
 }

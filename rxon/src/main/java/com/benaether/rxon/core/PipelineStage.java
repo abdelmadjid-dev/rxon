@@ -20,7 +20,8 @@ sealed interface PipelineStage permits
     PipelineStage.AsyncComputeStage,
     PipelineStage.AsyncMainStage,
     PipelineStage.ChainStage,
-    PipelineStage.FinishStage,
+    PipelineStage.BreakStage,
+    PipelineStage.RecoverBreakStage,
     PipelineStage.FailStage {
 
     ResiliencePolicy.ResilienceMetadata resilience();
@@ -134,7 +135,11 @@ sealed interface PipelineStage permits
         }
     }
 
-    record FinishStage(Object value) implements PipelineStage {
+    record BreakStage(Object value) implements PipelineStage {
+        @Override public ResiliencePolicy.ResilienceMetadata resilience() { return ResiliencePolicy.ResilienceMetadata.EMPTY; }
+    }
+
+    record RecoverBreakStage(Object value) implements PipelineStage {
         @Override public ResiliencePolicy.ResilienceMetadata resilience() { return ResiliencePolicy.ResilienceMetadata.EMPTY; }
     }
 

@@ -131,8 +131,27 @@ public final class Work<T, C> {
         return new Work<Done, Object>(new ArrayList<>()).peekMain(ignored -> task.run());
     }
 
+    /**
+     * @deprecated Use {@link #breakWork(Object)} instead.
+     */
+    @Deprecated
     public static <T> Work<T, Object> finish(T value) {
-        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.FinishStage(value));
+        return breakWork(value);
+    }
+
+    /**
+     * Terminate the pipeline execution with a result.
+     * This "break" can be recovered using {@link #recoverBreak(Object)}.
+     */
+    public static <T> Work<T, Object> breakWork(T value) {
+        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.BreakStage(value));
+    }
+
+    /**
+     * Create a pipeline that just continues with the given value.
+     */
+    public static <T> Work<T, Object> continueWork(T value) {
+        return new Work<T, Object>(new ArrayList<>()).thenRead((ctx, ignored) -> value, (ctx, res) -> ctx);
     }
 
     public static <T> Work<T, Object> fail(Throwable error) {
@@ -143,9 +162,10 @@ public final class Work<T, C> {
      * Merge the stages of another pipeline into the current one.
      * This is a static composition that combines blueprints.
      */
-    public <R> Work<R, C> then(Work<R, C> other) {
-        List<PipelineStage> newStages = new ArrayList<>(this.stages);
-        newStages.addAll(other.stages);
+    @SuppressWarnings("unchecked")
+    public <R> Work<R, C> then(Work<R, ?> other) {
+        List<PipelineStage> newStages = new java.util.ArrayList<>(this.stages);
+        newStages.addAll(other.getStages());
         return new Work<>(newStages);
     }
 
@@ -165,6 +185,24 @@ public final class Work<T, C> {
      */
     public <R> Work<R, C> thenChain(java.util.function.Function<T, Work<R, C>> task) {
         return thenChain((ctx, val) -> task.apply(val));
+    }
+
+    /**
+     * Perform a side-effect sub-pipeline dynamically.
+     * Preserves the current value and context of the parent pipeline.
+     */
+    @SuppressWarnings("unchecked")
+    public Work<T, C> peekChain(BiFunction<C, T, Work<?, C>> task) {
+        return thenChain((ctx, val) -> {
+            Work<?, C> sub = task.apply((C) ctx, (T) val);
+            List<PipelineStage> newStages = new java.util.ArrayList<>(sub.getStages());
+            newStages.add(new PipelineStage.BreakStage(val));
+            return new Work<>(newStages);
+        });
+    }
+
+    public Work<T, C> peekChain(java.util.function.Function<T, Work<?, C>> task) {
+        return peekChain((ctx, val) -> task.apply(val));
     }
 
     public <R> Work<R, C> thenRead(Callable<R> task) {
@@ -458,6 +496,29 @@ public final class Work<T, C> {
 
         newStages.add(updated);
         return new Work<>(newStages);
+    }
+
+    /**
+     * Terminate the current pipeline execution with a result.
+     * This "break" can be recovered using {@link #recoverBreak(Object)}.
+     */
+    public Work<T, C> thenBreak(T value) {
+        return append(new PipelineStage.BreakStage(value));
+    }
+
+    /**
+     * Continue the pipeline with a new value.
+     */
+    public <R> Work<R, C> thenContinue(R value) {
+        return thenRead((ctx, ignored) -> value, (ctx, res) -> ctx);
+    }
+
+    /**
+     * Resumes a broken pipeline by resetting the terminated flag and providing a recovery value.
+     * If the pipeline is not broken, this stage does nothing.
+     */
+    public Work<T, C> recoverBreak(T recoveryValue) {
+        return append(new PipelineStage.RecoverBreakStage(recoveryValue));
     }
 
     public Single<T> asTerminalSingle() {
