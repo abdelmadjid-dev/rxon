@@ -7,15 +7,15 @@ import java.util.List;
  * Internal exception used to carry context and compensation stack during pipeline failure.
  */
 final class PipelineException extends RuntimeException {
-    private final Object context;
-    private final List<Work<Done, ?>> compensationStack;
+    private final Object value;
+    private final List<Work<Done>> compensationStack;
 
-    PipelineException(Throwable cause, Object context, List<Work<Done, ?>> compensationStack) {
+    PipelineException(Throwable cause, Object value, List<Work<Done>> compensationStack) {
         super(cause);
-        this.context = context;
+        this.value = value;
         this.compensationStack = compensationStack;
     }
 
-    Object getContext() { return context; }
-    List<Work<Done, ?>> getCompensationStack() { return compensationStack; }
+    Object getValue() { return value; }
+    List<Work<Done>> getCompensationStack() { return compensationStack; }
 }

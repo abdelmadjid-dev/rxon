@@ -35,7 +35,7 @@ public final class RxLog {
     public static void e(String tag, String message, Throwable throwable) {
         RxOnLogger log = RxOnConfig.getLogger();
         if (RxOnConfig.isDebug()) {
-            Throwable root = findRootCause(throwable);
+            Throwable root = RxOnConfig.mapError(findRootCause(throwable));
             log.e(
                     tag,
                     message,
@@ -57,7 +57,7 @@ public final class RxLog {
     public static void w(String tag, String message, Throwable throwable) {
         RxOnLogger log = RxOnConfig.getLogger();
         if (RxOnConfig.isDebug()) {
-            Throwable root = findRootCause(throwable);
+            Throwable root = RxOnConfig.mapError(findRootCause(throwable));
             log.w(
                     tag,
                     message,
@@ -92,8 +92,11 @@ public final class RxLog {
         if (throwable == null) return null;
 
         Throwable current = throwable;
+        // Search for the most relevant exception in the chain
+        // We prefer the first exception that isn't a generic Rx wrapper
         while (current.getCause() != null
-                && !(current.getCause() instanceof hu.akarnokd.rxjava3.debug.RxJavaAssemblyException)) {
+                && (current.getClass().getName().contains("io.reactivex.rxjava3.exceptions")
+                || current.getClass().getName().contains("OnAssemblyException"))) {
             current = current.getCause();
         }
         return current;

@@ -36,6 +36,7 @@ public final class RxOnConfig {
     private static final Map<WorkScheduler, Scheduler> customSchedulers =
             new EnumMap<>(WorkScheduler.class);
     private static boolean debug = false;
+    private static boolean cleanStackTrace = false;
     private static RxOnLogger rxOnLogger = new DefaultRxOnLogger();
 
     private RxOnConfig() {}
@@ -46,7 +47,11 @@ public final class RxOnConfig {
      * @return mapped throwable
      */
     public static Throwable mapError(Throwable t) {
-        return rxOnErrorMapper.map(t);
+        Throwable mapped = rxOnErrorMapper.map(t);
+        if (cleanStackTrace) {
+            return StackTraceCleaner.clean(mapped);
+        }
+        return mapped;
     }
 
     /** @return true if debug mode is enabled */
@@ -89,6 +94,11 @@ public final class RxOnConfig {
         /** @param mapper custom error mapper
          * @return next step */
         BuildStep errorMapper(RxOnErrorMapper mapper);
+
+        /** Enable automatic stacktrace cleaning for all errors
+         * @param enabled enable cleaning
+         * @return next step */
+        BuildStep cleanStackTrace(boolean enabled);
     }
 
     /** Step for final configuration and initialization */
@@ -108,6 +118,7 @@ public final class RxOnConfig {
 
     private static class Builder implements DebugStep, LoggerStep, ErrorMapperStep, BuildStep {
         private boolean isDebug;
+        private boolean cleanStackTrace;
         private RxOnLogger rxOnLogger;
         private RxOnErrorMapper rxOnErrorMapper;
         private final Map<WorkScheduler, Scheduler> customSchedulers = new EnumMap<>(WorkScheduler.class);
@@ -131,6 +142,12 @@ public final class RxOnConfig {
         }
 
         @Override
+        public BuildStep cleanStackTrace(boolean enabled) {
+            this.cleanStackTrace = enabled;
+            return this;
+        }
+
+        @Override
         public BuildStep scheduler(WorkScheduler type, Scheduler scheduler) {
             customSchedulers.put(type, scheduler);
             return this;
@@ -139,6 +156,7 @@ public final class RxOnConfig {
         @Override
         public void init() {
             RxOnConfig.debug = isDebug;
+            RxOnConfig.cleanStackTrace = cleanStackTrace;
             RxOnConfig.rxOnLogger = rxOnLogger != null ? rxOnLogger : new DefaultRxOnLogger();
             RxOnConfig.rxOnErrorMapper = rxOnErrorMapper != null ? rxOnErrorMapper : t -> t;
             RxOnConfig.customSchedulers.putAll(customSchedulers);

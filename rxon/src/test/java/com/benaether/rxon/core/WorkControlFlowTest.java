@@ -26,8 +26,8 @@ public class WorkControlFlowTest {
         AtomicBoolean subsequentRun = new AtomicBoolean(false);
         
         Integer result = Work.<Integer>callable(WorkScheduler.IO, () -> 10)
-            .breakIf(i -> i > 5, -1)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
+            .thenChain(i -> i > 5 ? Work.just(WorkScheduler.COMPUTE, -1).thenBreak(-1) : Work.just(WorkScheduler.COMPUTE, i))
+            .thenFunction(WorkScheduler.COMPUTE, val -> {
                 subsequentRun.set(true);
                 return 100;
             })
@@ -41,8 +41,8 @@ public class WorkControlFlowTest {
     @Test
     public void testBreakIf_ConditionNotMet_Continues() {
         String result = Work.<Integer>callable(WorkScheduler.IO, () -> 10)
-            .breakIf(i -> i < 5, -1)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> "Continued")
+            .thenChain(i -> i < 5 ? Work.just(WorkScheduler.COMPUTE, -1).thenBreak(-1) : Work.just(WorkScheduler.COMPUTE, i))
+            .thenFunction(WorkScheduler.COMPUTE, val -> "Continued")
             .asTerminalSingle()
             .blockingGet();
             
@@ -54,21 +54,22 @@ public class WorkControlFlowTest {
         RuntimeException error = new RuntimeException("Forced Fail");
         
         Work.<Integer>callable(WorkScheduler.IO, () -> 10)
-            .failIf(i -> i > 5, error)
+            .reject(WorkScheduler.COMPUTE, i -> i > 5, i -> error)
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
             .assertError(e -> {
-                while (e.getCause() != null && e != error) e = e.getCause();
-                return e == error;
+                Throwable current = e;
+                while (current.getCause() != null && current != error) current = current.getCause();
+                return current == error;
             });
     }
 
     @Test
     public void testFailIf_ConditionNotMet_Continues() {
         Work.<Integer>callable(WorkScheduler.IO, () -> 10)
-            .failIf(i -> i < 5, new RuntimeException("Fail"))
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> "Success")
+            .reject(WorkScheduler.COMPUTE, i -> i < 5, i -> new RuntimeException("Fail"))
+            .thenFunction(WorkScheduler.COMPUTE, val -> "Success")
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)

@@ -87,4 +87,3 @@ public final class DefaultSchedulers {
     /** @return main thread scheduler */
     public static Scheduler main() { return Schedulers.trampoline(); }
 }
-

@@ -36,13 +36,13 @@ public class ObserveTest {
         AtomicInteger workCounter = new AtomicInteger(0);
         CountDownLatch latch = new CountDownLatch(3);
         
-        Work<Done, Object> work = Work.callable(WorkScheduler.IO, () -> {
+        Work<Done> work = Work.callable(WorkScheduler.IO, () -> {
             workCounter.incrementAndGet();
             latch.countDown();
             return Done.INSTANCE;
         });
 
-        Observe<Integer, Object> observation = Observe.flow(WorkScheduler.IO, Flowable.just(1, 2, 3));
+        Observe<Integer> observation = Observe.flow(WorkScheduler.IO, Flowable.just(1, 2, 3));
         Disposable d = observation.trigger(work);
 
         assertTrue("Timed out waiting for work triggers", latch.await(2, TimeUnit.SECONDS));
@@ -55,7 +55,7 @@ public class ObserveTest {
         AtomicInteger workCounter = new AtomicInteger(0);
         CountDownLatch latch = new CountDownLatch(2);
 
-        Work<Done, Object> work = Work.callable(WorkScheduler.IO, () -> {
+        Work<Done> work = Work.callable(WorkScheduler.IO, () -> {
             workCounter.incrementAndGet();
             latch.countDown();
             return Done.INSTANCE;
@@ -67,8 +67,8 @@ public class ObserveTest {
             Flowable.just(4).delay(200, TimeUnit.MILLISECONDS)
         );
 
-        Observe<Integer, Object> observation = Observe.flow(WorkScheduler.IO, source)
-            .debounce(100, TimeUnit.MILLISECONDS);
+        Observe<Integer> observation = Observe.flow(WorkScheduler.IO, source)
+            .debounce(WorkScheduler.COMPUTE, 100, TimeUnit.MILLISECONDS);
         
         Disposable d = observation.trigger(work);
 
@@ -84,7 +84,7 @@ public class ObserveTest {
         AtomicInteger workCounter = new AtomicInteger(0);
         CountDownLatch latch = new CountDownLatch(2);
 
-        Work<Done, Object> work = Work.callable(WorkScheduler.IO, () -> {
+        Work<Done> work = Work.callable(WorkScheduler.IO, () -> {
             workCounter.incrementAndGet();
             latch.countDown();
             return Done.INSTANCE;
@@ -96,8 +96,8 @@ public class ObserveTest {
             Flowable.just(4).delay(200, TimeUnit.MILLISECONDS)
         );
 
-        Observe<Integer, Object> observation = Observe.flow(WorkScheduler.IO, source)
-            .throttle(100, TimeUnit.MILLISECONDS);
+        Observe<Integer> observation = Observe.flow(WorkScheduler.IO, source)
+            .throttle(WorkScheduler.COMPUTE, 100, TimeUnit.MILLISECONDS);
         
         Disposable d = observation.trigger(work);
 
@@ -113,14 +113,14 @@ public class ObserveTest {
         AtomicInteger workCounter = new AtomicInteger(0);
         CountDownLatch latch = new CountDownLatch(2);
 
-        Work<Done, Object> work = Work.callable(WorkScheduler.IO, () -> {
+        Work<Done> work = Work.callable(WorkScheduler.IO, () -> {
             workCounter.incrementAndGet();
             latch.countDown();
             return Done.INSTANCE;
         });
 
-        Observe<Integer, Object> observation = Observe.flow(WorkScheduler.IO, Flowable.just(1, 1, 2, 2, 2))
-            .distinct();
+        Observe<Integer> observation = Observe.flow(WorkScheduler.IO, Flowable.just(1, 1, 2, 2, 2))
+            .distinct(WorkScheduler.COMPUTE);
         
         Disposable d = observation.trigger(work);
 
@@ -135,9 +135,9 @@ public class ObserveTest {
         List<String> results = new ArrayList<>();
         CountDownLatch latch = new CountDownLatch(3);
 
-        Work<String, Object> work = Work.callable(WorkScheduler.IO, () -> "Data");
+        Work<String> work = Work.callable(WorkScheduler.IO, () -> "Data");
 
-        Observe<Integer, Object> observation = Observe.flow(WorkScheduler.IO, Flowable.just(1, 2, 3));
+        Observe<Integer> observation = Observe.flow(WorkScheduler.IO, Flowable.just(1, 2, 3));
         Disposable d = observation.trigger(work, val -> {
             results.add(val);
             latch.countDown();
@@ -154,11 +154,11 @@ public class ObserveTest {
         CountDownLatch latch = new CountDownLatch(1);
         Throwable[] capturedError = new Throwable[1];
 
-        Work<Done, Object> work = Work.callable(WorkScheduler.IO, () -> Done.INSTANCE);
+        Work<Done> work = Work.callable(WorkScheduler.IO, () -> Done.INSTANCE);
 
         Flowable<Integer> errorSource = Flowable.error(new RuntimeException("Source Fail"));
 
-        Observe<Integer, Object> observation = Observe.flow(WorkScheduler.IO, errorSource);
+        Observe<Integer> observation = Observe.flow(WorkScheduler.IO, errorSource);
         Disposable d = observation.trigger(work, val -> {}, err -> {
             capturedError[0] = err;
             latch.countDown();

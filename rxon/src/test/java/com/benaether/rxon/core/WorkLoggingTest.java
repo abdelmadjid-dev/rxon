@@ -7,9 +7,7 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class WorkLoggingTest {
@@ -39,9 +37,9 @@ public class WorkLoggingTest {
 
     @Test
     public void testWork_TagAndLifecycleLogging() {
-        Work.callable(WorkScheduler.IO, () -> "Hello")
+        Work.<String>callable(WorkScheduler.IO, () -> "Hello")
             .tag("MyWork")
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val + " World")
+            .thenFunction(WorkScheduler.COMPUTE, val -> val + " World")
             .asTerminalSingle()
             .blockingGet();
 

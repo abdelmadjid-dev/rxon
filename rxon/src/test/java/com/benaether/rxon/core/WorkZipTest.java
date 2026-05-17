@@ -1,6 +1,7 @@
 package com.benaether.rxon.core;
 
 import com.benaether.rxon.schedulers.WorkScheduler;
+import com.benaether.rxon.scopes.Done;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -21,7 +22,7 @@ public class WorkZipTest {
 
     @Test
     public void testZipWith_CombinesResults() {
-        Work<Integer, Object> other = Work.callable(WorkScheduler.COMPUTE, () -> 20);
+        Work<Integer> other = Work.callable(WorkScheduler.COMPUTE, () -> 20);
         
         Integer result = Work.<Integer>callable(WorkScheduler.IO, () -> 10)
             .zipWith(other, (v1, v2) -> v1 + v2)
@@ -34,28 +35,17 @@ public class WorkZipTest {
     @Test
     public void testZipWith_PropagatesErrorsFromOther() {
         RuntimeException otherError = new RuntimeException("Other Fail");
-        Work<Integer, Object> other = Work.fail(otherError);
+        Work<Done> other = Work.fail(otherError);
         
         Work.<Integer>callable(WorkScheduler.IO, () -> 10)
-            .zipWith(other, (v1, v2) -> v1 + v2)
+            .zipWith(other, (v1, v2) -> v1)
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
             .assertError(e -> {
-                while (e.getCause() != null && e != otherError) e = e.getCause();
-                return e == otherError;
+                Throwable current = e;
+                while (current.getCause() != null && current != otherError) current = current.getCause();
+                return current == otherError;
             });
-    }
-
-    @Test
-    public void testZipWith_AccessesContext() {
-        Work.withContext(() -> "Base")
-            .thenCallable(WorkScheduler.IO, () -> 10)
-            .zipWith(Work.callable(WorkScheduler.COMPUTE, () -> "Other"), (v1, v2) -> v1 + ":" + v2)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> ctx + "->" + val)
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Base->10:Other");
     }
 }

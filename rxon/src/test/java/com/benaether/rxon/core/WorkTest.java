@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Unit tests for {@link Work} showcasing context passing and pipeline orchestration.
+ * Unit tests for {@link Work} showcasing pipeline orchestration.
  */
 public class WorkTest {
 
@@ -26,102 +26,14 @@ public class WorkTest {
     }
 
     // ===========================================================================================
-    // CONTEXT PASSING
-    // ===========================================================================================
-
-    @Test
-    public void testContextPropagation() {
-        Work.withContext(() -> "Initial")
-            .thenCallable(WorkScheduler.DATA_READ, () -> "Data")
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, data) -> ctx + ":" + data, (ctx, res) -> res)
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Initial:Data")
-            .assertComplete();
-    }
-
-    @Test
-    public void testContextMutation() {
-        class MutableCtx {
-            int count = 0;
-            void inc() { count++; }
-        }
-
-        MutableCtx ctx = new MutableCtx();
-
-        Work.withContext(() -> ctx)
-            .thenFunction(WorkScheduler.COMPUTE, (c, val) -> {
-                c.inc();
-                return "Step 1";
-            }, (c, res) -> c)
-            .thenFunction(WorkScheduler.COMPUTE, (c, val) -> {
-                c.inc();
-                return "Step 2";
-            }, (c, res) -> c)
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Step 2")
-            .assertComplete();
-
-        assertEquals(2, ctx.count);
-    }
-
-    @Test
-    public void testContextUpdate_Replacement() {
-        Work.withContext(() -> 1)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val, (ctx, res) -> ctx + 10)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> "Value: " + ctx, (ctx, res) -> ctx)
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Value: 11")
-            .assertComplete();
-    }
-
-    @Test
-    public void testContextSwitching() {
-        // Start with no context (Object)
-        Work.callable(WorkScheduler.IO, () -> "Hello")
-            .usingContext(val -> 100) // Switch to Integer context based on value
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val + " " + ctx, (ctx, res) -> ctx)
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Hello 100")
-            .assertComplete();
-    }
-
-    @Test
-    public void testContextTypeUpdate() {
-        // Start with Integer context
-        Work.withContext(() -> 100)
-            .updateContext((ctx, val) -> {
-                class MutableCtx {
-                    String val = "";
-                }
-                MutableCtx newCtx = new MutableCtx();
-                newCtx.val = "StringCtx:" + ctx;
-                return newCtx;
-            }) // Change to String context
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> "Value is " + ctx.val, (ctx, res) -> ctx)
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Value is StringCtx:100")
-            .assertComplete();
-    }
-
-    // ===========================================================================================
     // PIPELINE BASICS
     // ===========================================================================================
 
     @Test
     public void testSimplePipeline_EmitsTransformedValue() {
         Work.callable(WorkScheduler.IO, () -> 10)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, i) -> i * 2)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, i) -> "Result: " + i)
+            .thenFunction(WorkScheduler.COMPUTE, i -> i * 2)
+            .thenFunction(WorkScheduler.COMPUTE, i -> "Result: " + i)
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -134,16 +46,17 @@ public class WorkTest {
         RuntimeException expectedError = new RuntimeException("Something went wrong");
         
         Work.callable(WorkScheduler.IO, () -> 10)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, i) -> { throw expectedError; })
+            .thenFunction(WorkScheduler.COMPUTE, i -> { throw expectedError; })
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
             .assertError(e -> {
                 // Handle possible wrapping
-                while (e.getCause() != null && e != expectedError) {
-                    e = e.getCause();
+                Throwable current = e;
+                while (current.getCause() != null && current != expectedError) {
+                    current = current.getCause();
                 }
-                return e == expectedError;
+                return current == expectedError;
             })
             .assertNotComplete();
     }
@@ -167,7 +80,8 @@ public class WorkTest {
 
     @Test
     public void testBreak_ImmediatelyTerminatesSuccessfully() {
-        Work.breakWork("Early Return")
+        Work.just(WorkScheduler.COMPUTE, "Early Return")
+            .thenBreak("Early Return")
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -192,7 +106,7 @@ public class WorkTest {
     @Test
     public void testRequire_Success() {
         Work.callable(WorkScheduler.IO, () -> 10)
-            .require(i -> i > 5, i -> new RuntimeException("Too small"))
+            .require(WorkScheduler.COMPUTE, i -> i > 5, i -> new RuntimeException("Too small"))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -202,33 +116,16 @@ public class WorkTest {
     @Test
     public void testRequire_Failure() {
         Work.callable(WorkScheduler.IO, () -> 3)
-            .require(i -> i > 5, i -> new RuntimeException("Too small"))
+            .require(WorkScheduler.COMPUTE, i -> i > 5, i -> new RuntimeException("Too small"))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
             .assertError(e -> {
-                while (e.getCause() != null && !"Too small".equals(e.getMessage())) {
-                    e = e.getCause();
+                Throwable current = e;
+                while (current.getCause() != null && !"Too small".equals(current.getMessage())) {
+                    current = current.getCause();
                 }
-                return "Too small".equals(e.getMessage());
+                return "Too small".equals(current.getMessage());
             });
-    }
-
-    @Test
-    public void testLazyContextInitialization() {
-        AtomicInteger initCount = new AtomicInteger(0);
-        Work<String, Integer> work = Work.withContext(() -> {
-            initCount.incrementAndGet();
-            return 10;
-        }).thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> "Value:" + ctx, (ctx, res) -> ctx);
-
-        assertEquals(0, initCount.get()); // Not initialized yet
-
-        work.asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Value:10");
-
-        assertEquals(1, initCount.get()); // Initialized once
     }
 }

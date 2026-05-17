@@ -3,9 +3,7 @@ package com.benaether.rxon.core;
 import static org.junit.Assert.assertEquals;
 
 import com.benaether.rxon.schedulers.WorkScheduler;
-import com.benaether.rxon.scopes.Done;
 import io.reactivex.rxjava3.core.Flowable;
-import io.reactivex.rxjava3.subscribers.TestSubscriber;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -27,7 +25,7 @@ public class ObserveParityTest {
     @Test
     public void testObserve_ChainingParity() {
         Observe.iterable(WorkScheduler.IO, Arrays.asList(1, 2, 3))
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val * 10)
+            .thenFunction(WorkScheduler.COMPUTE, val -> val * 10)
             .thenCallable(WorkScheduler.IO, () -> "Result")
             .asFlowable()
             .test()
@@ -38,7 +36,7 @@ public class ObserveParityTest {
     @Test
     public void testObserve_StreamingChaining() {
         Observe.iterable(WorkScheduler.IO, Arrays.asList(1, 2))
-            .thenFlowable(WorkScheduler.COMPUTE, (ctx, val) -> Flowable.just(val, val + 1))
+            .thenFlowable(WorkScheduler.COMPUTE, val -> Flowable.just(val, val + 1))
             .asFlowable()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
@@ -46,24 +44,13 @@ public class ObserveParityTest {
     }
 
     @Test
-    public void testObserve_ContextPropagation() {
-        Observe.iterable(WorkScheduler.IO, Arrays.asList(1))
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val, (ctx, res) -> "ContextValue")
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> ctx + ":" + val)
-            .asFlowable()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("ContextValue:1");
-    }
-
-    @Test
     public void testObserve_ComplexPipeline() {
         AtomicInteger counter = new AtomicInteger(0);
 
         Observe.flow(WorkScheduler.IO, Flowable.just(10, 20))
-            .thenConsumer(WorkScheduler.COMPUTE, (ctx, val) -> counter.addAndGet(val))
-            .thenSingle(WorkScheduler.IO, (ctx, val) -> io.reactivex.rxjava3.core.Single.just(val / 10))
-            .thenFlowable(WorkScheduler.COMPUTE, (ctx, val) -> Flowable.range(0, val))
+            .thenConsumer(WorkScheduler.COMPUTE, counter::addAndGet)
+            .thenSingle(WorkScheduler.IO, val -> io.reactivex.rxjava3.core.Single.just(val / 10))
+            .thenFlowable(WorkScheduler.COMPUTE, val -> Flowable.range(0, val))
             .asFlowable()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)

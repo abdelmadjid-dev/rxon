@@ -31,7 +31,7 @@ public class WorkEntryPointTest {
             .awaitDone(2, TimeUnit.SECONDS)
             .assertResult("single");
 
-        Work.maybe(WorkScheduler.DATA_WRITE, Maybe.just("maybe"))
+        Work.maybe(WorkScheduler.COMPUTE, Maybe.just("maybe"))
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)

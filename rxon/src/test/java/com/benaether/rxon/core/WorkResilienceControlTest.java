@@ -26,7 +26,7 @@ public class WorkResilienceControlTest {
                 throw new RuntimeException("Crash");
             })
             .recover(err -> "Recovered")
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val + " and Continued")
+            .thenFunction(WorkScheduler.COMPUTE, val -> val + " and Continued")
             .asTerminalSingle()
             .blockingGet();
             
@@ -57,22 +57,9 @@ public class WorkResilienceControlTest {
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
             .assertError(e -> {
-                while (e.getCause() != null && e != fatal) e = e.getCause();
-                return e == fatal;
+                Throwable current = e;
+                while (current.getCause() != null && current != fatal) current = current.getCause();
+                return current == fatal;
             });
-    }
-
-    @Test
-    public void testRecover_PreservesContext() {
-        Work.withContext(() -> "Meta")
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> {
-                throw new RuntimeException("Error");
-            })
-            .recover(err -> "Resumed")
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> ctx + ":" + val)
-            .asTerminalSingle()
-            .test()
-            .awaitDone(2, TimeUnit.SECONDS)
-            .assertValue("Meta:Resumed");
     }
 }

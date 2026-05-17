@@ -1,8 +1,6 @@
 package com.benaether.rxon.core;
 
 import com.benaether.rxon.schedulers.WorkScheduler;
-import java.util.function.BiConsumer;
-import java.util.function.BiFunction;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -23,51 +21,81 @@ public sealed interface PipelineStage permits
     PipelineStage.ZipStage,
     PipelineStage.StreamingStage,
     PipelineStage.ConditioningStage,
+    PipelineStage.NoOpStage,
+    PipelineStage.FinalStage,
     PipelineStage.LogStage {
 
     ResiliencePolicy.ResilienceMetadata resilience();
+    
+    PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience);
+
+    record NoOpStage(WorkScheduler scheduler, ResiliencePolicy.ResilienceMetadata resilience) implements PipelineStage {
+        public NoOpStage(WorkScheduler scheduler) { this(scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY); }
+        @Override public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) { return new NoOpStage(scheduler, resilience); }
+    }
+
+    record FinalStage(Runnable action) implements PipelineStage {
+        @Override public ResiliencePolicy.ResilienceMetadata resilience() { return ResiliencePolicy.ResilienceMetadata.EMPTY; }
+        @Override public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) { return this; }
+    }
 
     record ChainStage(
-        BiFunction<Object, Object, Work<?, ?>> task,
+        java.util.function.Function<Object, Work<?>> task,
         ResiliencePolicy.ResilienceMetadata resilience
     ) implements PipelineStage {
-        ChainStage(BiFunction<Object, Object, Work<?, ?>> task) {
+        ChainStage(java.util.function.Function<Object, Work<?>> task) {
             this(task, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new ChainStage(task, resilience);
         }
     }
 
     record BreakStage(Object value) implements PipelineStage {
         @Override public ResiliencePolicy.ResilienceMetadata resilience() { return ResiliencePolicy.ResilienceMetadata.EMPTY; }
+        @Override public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) { return this; }
     }
 
     record RecoverBreakStage(Object value) implements PipelineStage {
         @Override public ResiliencePolicy.ResilienceMetadata resilience() { return ResiliencePolicy.ResilienceMetadata.EMPTY; }
+        @Override public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) { return this; }
     }
 
     record SyncStage(
-        BiFunction<Object, Object, Object> task,
-        BiFunction<Object, Object, Object> contextMapper,
+        java.util.function.BiFunction<Object, Object, Object> task,
         WorkScheduler scheduler,
         ResiliencePolicy.ResilienceMetadata resilience
     ) implements PipelineStage {
-        SyncStage(BiFunction<Object, Object, Object> task, BiFunction<Object, Object, Object> contextMapper, WorkScheduler scheduler) {
-            this(task, contextMapper, scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        SyncStage(java.util.function.BiFunction<Object, Object, Object> task, WorkScheduler scheduler) {
+            this(task, scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new SyncStage(task, scheduler, resilience);
         }
     }
 
     record AsyncStage(
-        BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task,
-        BiFunction<Object, Object, Object> contextMapper,
+        java.util.function.BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task,
         WorkScheduler scheduler,
         ResiliencePolicy.ResilienceMetadata resilience
     ) implements PipelineStage {
-        AsyncStage(BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task, BiFunction<Object, Object, Object> contextMapper, WorkScheduler scheduler) {
-            this(task, contextMapper, scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        AsyncStage(java.util.function.BiFunction<Object, Object, io.reactivex.rxjava3.core.Single<Object>> task, WorkScheduler scheduler) {
+            this(task, scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new AsyncStage(task, scheduler, resilience);
         }
     }
 
     record FailStage(Throwable error) implements PipelineStage {
         @Override public ResiliencePolicy.ResilienceMetadata resilience() { return ResiliencePolicy.ResilienceMetadata.EMPTY; }
+        @Override public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) { return this; }
     }
 
     record RecoverStage(
@@ -77,6 +105,11 @@ public sealed interface PipelineStage permits
     ) implements PipelineStage {
         RecoverStage(Class<? extends Throwable> type, java.util.function.Function<Throwable, Object> fallback) {
             this(type, fallback, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new RecoverStage(type, fallback, resilience);
         }
     }
 
@@ -88,6 +121,11 @@ public sealed interface PipelineStage permits
         ConditionalBreakStage(io.reactivex.rxjava3.functions.Predicate<Object> condition, Object defaultValue) {
             this(condition, defaultValue, ResiliencePolicy.ResilienceMetadata.EMPTY);
         }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new ConditionalBreakStage(condition, defaultValue, resilience);
+        }
     }
 
     record ConditionalFailStage(
@@ -98,26 +136,40 @@ public sealed interface PipelineStage permits
         ConditionalFailStage(io.reactivex.rxjava3.functions.Predicate<Object> condition, Throwable error) {
             this(condition, error, ResiliencePolicy.ResilienceMetadata.EMPTY);
         }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new ConditionalFailStage(condition, error, resilience);
+        }
     }
 
     record ZipStage(
-        Work<?, ?> other,
-        BiFunction<Object, Object, Object> zipper,
+        Work<?> other,
+        java.util.function.BiFunction<Object, Object, Object> zipper,
         ResiliencePolicy.ResilienceMetadata resilience
     ) implements PipelineStage {
-        ZipStage(Work<?, ?> other, BiFunction<Object, Object, Object> zipper) {
+        ZipStage(Work<?> other, java.util.function.BiFunction<Object, Object, Object> zipper) {
             this(other, zipper, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new ZipStage(other, zipper, resilience);
         }
     }
 
     record StreamingStage(
-        BiFunction<Object, Object, io.reactivex.rxjava3.core.Flowable<Object>> task,
-        BiFunction<Object, Object, Object> contextMapper,
+        java.util.function.BiFunction<Object, Object, io.reactivex.rxjava3.core.Flowable<Object>> task,
         WorkScheduler scheduler,
         ResiliencePolicy.ResilienceMetadata resilience
     ) implements PipelineStage {
-        StreamingStage(BiFunction<Object, Object, io.reactivex.rxjava3.core.Flowable<Object>> task, BiFunction<Object, Object, Object> contextMapper, WorkScheduler scheduler) {
-            this(task, contextMapper, scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        StreamingStage(java.util.function.BiFunction<Object, Object, io.reactivex.rxjava3.core.Flowable<Object>> task, WorkScheduler scheduler) {
+            this(task, scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new StreamingStage(task, scheduler, resilience);
         }
     }
 
@@ -127,14 +179,20 @@ public sealed interface PipelineStage permits
         ConditioningType type,
         long time,
         TimeUnit unit,
+        WorkScheduler scheduler,
         ResiliencePolicy.ResilienceMetadata resilience
     ) implements PipelineStage {
-        ConditioningStage(ConditioningType type, long time, TimeUnit unit) {
-            this(type, time, unit, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        ConditioningStage(ConditioningType type, long time, TimeUnit unit, WorkScheduler scheduler) {
+            this(type, time, unit, scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY);
         }
         
-        ConditioningStage(ConditioningType type) {
-            this(type, 0, null, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        ConditioningStage(ConditioningType type, WorkScheduler scheduler) {
+            this(type, 0, null, scheduler, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new ConditioningStage(type, time, unit, scheduler, resilience);
         }
     }
 
@@ -145,6 +203,11 @@ public sealed interface PipelineStage permits
     ) implements PipelineStage {
         LogStage(LogLevel level, String message) {
             this(level, message, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new LogStage(level, message, resilience);
         }
 
         @Override public String toString() {

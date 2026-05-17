@@ -26,40 +26,33 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
-import java.util.function.Supplier;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
-import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Completable;
+import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;
 import io.reactivex.rxjava3.disposables.Disposable;
 import io.reactivex.rxjava3.functions.Consumer;
-import io.reactivex.rxjava3.functions.Function;
-import io.reactivex.rxjava3.functions.Predicate;
 
 /**
- * {@code Work<T, C>} is a Lazy Orchestration Engine.
- * It defines a "Pipeline" of semantic stages that are compiled into an executable 
- * RxJava chain only when a terminal operator is invoked.
+ * {@code Work<T, C>} is a lazy signal orchestration engine. 
+ * It remains idle until a terminal operator is invoked.
  */
-public final class Work<T, C> {
+public final class Work<T> {
+
     private static final String TAG = Work.class.getName();
 
     private final List<PipelineStage> stages;
     private final String tag;
-
-    private Work(List<PipelineStage> stages) {
+    
+    Work(List<PipelineStage> stages) {
         this(stages, "Work");
     }
 
-    private Work(List<PipelineStage> stages, String tag) {
+    Work(List<PipelineStage> stages, String tag) {
         this.stages = Collections.unmodifiableList(stages);
         this.tag = tag;
-    }
-
-    private <R, NewC> Work<R, NewC> append(PipelineStage stage) {
-        List<PipelineStage> newStages = new ArrayList<>(this.stages);
-        newStages.add(stage);
-        return new Work<>(newStages, tag);
     }
 
     List<PipelineStage> getStages() {
@@ -70,236 +63,215 @@ public final class Work<T, C> {
         return tag;
     }
 
-    /**
-     * Assign a semantic name to this Work instance for debugging purposes.
-     */
-    public Work<T, C> tag(String name) {
-        return new Work<>(this.stages, name);
-    }
-
-    /**
-     * Start a fresh pipeline with a lazy initial context state.
-     */
-    public static <C> Work<Done, C> withContext(Supplier<C> contextSupplier) {
-        return new Work<Done, Object>(new ArrayList<>())
-            .updateContext((ctx, val) -> contextSupplier.get());
-    }
-
-    /**
-     * Set the context for subsequent stages based on the current value.
-     */
-    public <NewC> Work<T, NewC> usingContext(java.util.function.Function<T, NewC> mapper) {
-        return updateContext((ctx, val) -> mapper.apply(val));
-    }
-
-    /**
-     * Change the context type entirely.
-     */
-    public <NewC> Work<T, NewC> updateContext(BiFunction<C, T, NewC> mapper) {
-        return thenFunction(WorkScheduler.COMPUTE, (ctx, val) -> val, mapper);
-    }
-
-    // Generic Entry Points
-
-    public static Work<Done, Object> action(WorkScheduler scheduler, Runnable action) {
-        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.SyncStage(
-            (ctx, val) -> { action.run(); return Done.INSTANCE; },
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    public static <T> Work<T, Object> callable(WorkScheduler scheduler, Callable<T> block) {
-        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.SyncStage(
-            (ctx, val) -> {
-                try { return block.call(); }
-                catch (Exception e) { throw new RuntimeException(e); }
-            },
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    public static <T> Work<T, Object> single(WorkScheduler scheduler, Single<T> single) {
-        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.AsyncStage(
-            (ctx, val) -> single.map(v -> (Object) v),
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    public static <T> Work<T, Object> maybe(WorkScheduler scheduler, Maybe<T> maybe) {
-        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.AsyncStage(
-            (ctx, val) -> maybe.map(v -> (Object) v).toSingle(),
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    public static Work<Done, Object> completable(WorkScheduler scheduler, Completable completable) {
-        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.AsyncStage(
-            (ctx, val) -> completable.toSingle(() -> Done.INSTANCE),
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    // Generic Chaining Operators
-
-    public Work<Done, C> thenAction(WorkScheduler scheduler, Runnable action) {
-        return append(new PipelineStage.SyncStage(
-            (ctx, val) -> { action.run(); return Done.INSTANCE; },
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    public <R> Work<R, C> thenCallable(WorkScheduler scheduler, Callable<R> block) {
-        return append(new PipelineStage.SyncStage(
-            (ctx, val) -> {
-                try { return block.call(); }
-                catch (Exception e) { throw new RuntimeException(e); }
-            },
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    public <R> Work<R, C> thenFunction(WorkScheduler scheduler, BiFunction<C, T, R> task) {
-        return thenFunction(scheduler, task, (ctx, res) -> ctx);
-    }
-
     @SuppressWarnings("unchecked")
-    public <R, NewC> Work<R, NewC> thenFunction(WorkScheduler scheduler, BiFunction<C, T, R> task, BiFunction<C, R, NewC> contextMapper) {
-        return append(new PipelineStage.SyncStage(
-            (ctx, val) -> {
-                try { return task.apply((C) ctx, (T) val); }
-                catch (Exception e) { throw new RuntimeException(e); }
-            },
-            (ctx, res) -> contextMapper.apply((C) ctx, (R) res),
-            scheduler
-        ));
-    }
-
-    @SuppressWarnings("unchecked")
-    public Work<T, C> thenConsumer(WorkScheduler scheduler, BiConsumer<C, T> action) {
-        return append(new PipelineStage.SyncStage(
-            (ctx, val) -> { action.accept((C) ctx, (T) val); return val; },
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    @SuppressWarnings("unchecked")
-    public <R> Work<R, C> thenSingle(WorkScheduler scheduler, BiFunction<C, T, Single<R>> mapper) {
-        return append(new PipelineStage.AsyncStage(
-            (ctx, val) -> (Single<Object>) (Single<?>) mapper.apply((C) ctx, (T) val),
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    @SuppressWarnings("unchecked")
-    public <R> Work<R, C> thenMaybe(WorkScheduler scheduler, BiFunction<C, T, Maybe<R>> mapper) {
-        return append(new PipelineStage.AsyncStage(
-            (ctx, val) -> (Single<Object>) (Single<?>) mapper.apply((C) ctx, (T) val).toSingle(),
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    @SuppressWarnings("unchecked")
-    public Work<Done, C> thenCompletable(WorkScheduler scheduler, BiFunction<C, T, Completable> mapper) {
-        return append(new PipelineStage.AsyncStage(
-            (ctx, val) -> mapper.apply((C) ctx, (T) val).toSingle(() -> Done.INSTANCE),
-            (ctx, res) -> ctx,
-            scheduler
-        ));
-    }
-
-    // Control Flow & Short-Circuiting
-
-    /**
-     * If the condition is met, terminates the pipeline early with the given default value.
-     */
-    @SuppressWarnings("unchecked")
-    public Work<T, C> breakIf(Predicate<T> condition, T defaultValue) {
-        return append(new PipelineStage.ConditionalBreakStage(
-            val -> condition.test((T) val),
-            defaultValue
-        ));
-    }
-
-    /**
-     * If the condition is met, fails the pipeline with the provided error.
-     */
-    @SuppressWarnings("unchecked")
-    public Work<T, C> failIf(Predicate<T> condition, Throwable error) {
-        return append(new PipelineStage.ConditionalFailStage(
-            val -> condition.test((T) val),
-            error
-        ));
-    }
-
-    /**
-     * Side-effect that runs on the current scheduler without modifying value or context.
-     */
-    public Work<T, C> peek(java.util.function.Consumer<T> action) {
-        return thenConsumer(WorkScheduler.COMPUTE, (ctx, val) -> action.accept(val));
-    }
-
-    // Debugging & Logging
-
-    /**
-     * Declarative stage to log the current pipeline state.
-     */
-    public Work<T, C> log(LogLevel level) {
-        return log(level, null);
-    }
-
-    /**
-     * Declarative stage to log the current pipeline state with a custom message.
-     */
-    public Work<T, C> log(LogLevel level, String message) {
-        return append(new PipelineStage.LogStage(level, message));
-    }
-
-    // Static Composition
-
-    public static <T> Work<T, Object> breakWork(T value) {
-        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.BreakStage(value));
-    }
-
-    public static <T> Work<T, Object> continueWork(T value) {
-        return callable(WorkScheduler.COMPUTE, () -> value);
-    }
-
-    public static <T> Work<T, Object> fail(Throwable error) {
-        return new Work<Done, Object>(new ArrayList<>()).append(new PipelineStage.FailStage(error));
-    }
-
-    @SuppressWarnings("unchecked")
-    public <R> Work<R, C> then(Work<R, ?> other) {
-        List<PipelineStage> newStages = new java.util.ArrayList<>(this.stages);
-        newStages.addAll(other.getStages());
+    private <R> Work<R> append(PipelineStage stage) {
+        List<PipelineStage> newStages = new ArrayList<>(this.stages);
+        newStages.add(stage);
         return new Work<>(newStages, tag);
     }
 
+    /**
+     * Assign a semantic name to this Work instance for debugging purposes.
+     */
+    public Work<T> tag(String name) {
+        return new Work<>(this.stages, name);
+    }
+
+    // Entry Points
+
+    public static <T> Work<T> just(WorkScheduler scheduler, T value) {
+        return new Work<Object>(new ArrayList<>(), "Work").thenCallable(scheduler, () -> value);
+    }
+
+    public static Work<Done> action(WorkScheduler scheduler, Runnable action) {
+        return new Work<Object>(new ArrayList<>(), "Work").thenAction(scheduler, action);
+    }
+
+    public static <R> Work<R> callable(WorkScheduler scheduler, Callable<R> block) {
+        return new Work<Object>(new ArrayList<>(), "Work").thenCallable(scheduler, block);
+    }
+
+    public static <R> Work<R> single(WorkScheduler scheduler, Single<R> source) {
+        return new Work<Object>(new ArrayList<>(), "Work").thenSingle(scheduler, val -> source);
+    }
+
+    public static <R> Work<R> maybe(WorkScheduler scheduler, Maybe<R> source) {
+        return new Work<Object>(new ArrayList<>(), "Work").thenMaybe(scheduler, val -> source);
+    }
+
+    public static Work<Done> completable(WorkScheduler scheduler, Completable source) {
+        return new Work<Object>(new ArrayList<>(), "Work").thenCompletable(scheduler, val -> source);
+    }
+
+    public static Work<Done> consumer(WorkScheduler scheduler, java.util.function.Consumer<Object> action) {
+        return new Work<Object>(new ArrayList<>(), "Work").thenAction(scheduler, () -> action.accept(null));
+    }
+
+    /**
+     * Sequentially executes a work segment for each item in the provided iterable.
+     */
+    public static <I, R> Work<Done> forEach(WorkScheduler scheduler, Iterable<I> items, Function<I, Work<R>> task) {
+        return Work.completable(scheduler, 
+            Observe.iterable(scheduler, items)
+                .thenChain(task)
+                .asFlowable()
+                .ignoreElements()
+        );
+    }
+
+    /**
+     * Executes all provided work segments in parallel and returns a list of results.
+     */
     @SuppressWarnings("unchecked")
-    public <R> Work<R, C> thenChain(BiFunction<C, T, Work<R, C>> task) {
-        return append(new PipelineStage.ChainStage(
-            (ctx, val) -> task.apply((C) ctx, (T) val)
+    public static <T> Work<List<T>> allOf(WorkScheduler scheduler, List<Work<T>> works) {
+        if (works.isEmpty()) return Work.just(scheduler, java.util.Collections.emptyList());
+        
+        java.util.List<io.reactivex.rxjava3.core.Single<T>> singles = new java.util.ArrayList<>();
+        for (Work<T> work : works) {
+            singles.add(work.asTerminalSingle());
+        }
+
+        return Work.single(scheduler, io.reactivex.rxjava3.core.Single.zip(singles, objects -> {
+            java.util.List<T> results = new java.util.ArrayList<>();
+            for (Object obj : objects) results.add((T) obj);
+            return results;
+        }));
+    }
+
+    public static Work<Done> fail(Throwable error) {
+        return new Work<Done>(new ArrayList<>()).append(new PipelineStage.FailStage(error));
+    }
+
+    // Chaining Operators
+
+    public Work<Done> thenAction(WorkScheduler scheduler, Runnable action) {
+        return append(new PipelineStage.SyncStage(
+            (val, ignored) -> { action.run(); return Done.INSTANCE; },
+            scheduler
         ));
     }
 
-    public <R> Work<R, C> thenChain(java.util.function.Function<T, Work<R, C>> task) {
-        return thenChain((ctx, val) -> task.apply(val));
+    public <R> Work<R> thenAction(WorkScheduler scheduler, Runnable action, BiFunction<T, Done, R> merger) {
+        return append(new PipelineStage.SyncStage(
+            (val, ignored) -> { action.run(); return merger.apply((T) val, Done.INSTANCE); },
+            scheduler
+        ));
     }
 
-    @SuppressWarnings("unchecked")
-    public Work<T, C> peekChain(BiFunction<C, T, Work<?, C>> task) {
-        return thenChain((ctx, val) -> {
-            Work<?, C> sub = task.apply((C) ctx, (T) val);
+    public <R> Work<R> thenCallable(WorkScheduler scheduler, Callable<R> block) {
+        return append(new PipelineStage.SyncStage(
+            (val, ignored) -> {
+                try { return block.call(); }
+                catch (Exception e) { throw new RuntimeException(e); }
+            },
+            scheduler
+        ));
+    }
+
+    public <R> Work<R> thenFunction(WorkScheduler scheduler, Function<T, R> task) {
+        return append(new PipelineStage.SyncStage(
+            (val, ignored) -> task.apply((T) val),
+            scheduler
+        ));
+    }
+
+    public <R, U> Work<U> thenFunction(WorkScheduler scheduler, Function<T, R> task, BiFunction<T, R, U> merger) {
+        return append(new PipelineStage.SyncStage(
+            (val, ignored) -> merger.apply((T) val, task.apply((T) val)),
+            scheduler
+        ));
+    }
+
+    public Work<T> thenConsumer(WorkScheduler scheduler, Consumer<T> action) {
+        return append(new PipelineStage.SyncStage(
+            (val, ignored) -> {
+                try { action.accept((T) val); return val; }
+                catch (Throwable e) { throw new RuntimeException(e); }
+            },
+            scheduler
+        ));
+    }
+
+    public <R> Work<R> thenConsumer(WorkScheduler scheduler, Consumer<T> action, BiFunction<T, T, R> merger) {
+        return append(new PipelineStage.SyncStage(
+            (val, ignored) -> {
+                try { action.accept((T) val); return merger.apply((T) val, (T) val); }
+                catch (Throwable e) { throw new RuntimeException(e); }
+            },
+            scheduler
+        ));
+    }
+
+    public Work<T> doOnNext(WorkScheduler scheduler, Consumer<T> action) {
+        return thenConsumer(scheduler, action);
+    }
+
+    public <R> Work<R> thenSingle(WorkScheduler scheduler, Function<T, Single<R>> mapper) {
+        return append(new PipelineStage.AsyncStage(
+            (val, ignored) -> (Single<Object>) mapper.apply((T) val),
+            scheduler
+        ));
+    }
+
+    public <R, U> Work<U> thenSingle(WorkScheduler scheduler, Function<T, Single<R>> mapper, BiFunction<T, R, U> merger) {
+        return append(new PipelineStage.AsyncStage(
+            (val, ignored) -> mapper.apply((T) val).map(res -> merger.apply((T) val, res)),
+            scheduler
+        ));
+    }
+
+    public <R> Work<R> thenMaybe(WorkScheduler scheduler, Function<T, Maybe<R>> mapper) {
+        return append(new PipelineStage.AsyncStage(
+            (val, ignored) -> (Single<Object>) (Single<?>) mapper.apply((T) val).toSingle(),
+            scheduler
+        ));
+    }
+
+    public <R, U> Work<U> thenMaybe(WorkScheduler scheduler, Function<T, Maybe<R>> mapper, BiFunction<T, R, U> merger) {
+        return append(new PipelineStage.AsyncStage(
+            (val, ignored) -> mapper.apply((T) val).toSingle().map(res -> merger.apply((T) val, res)),
+            scheduler
+        ));
+    }
+
+    public Work<Done> thenCompletable(WorkScheduler scheduler, Function<T, Completable> mapper) {
+        return append(new PipelineStage.AsyncStage(
+            (val, ignored) -> mapper.apply((T) val).toSingle(() -> Done.INSTANCE),
+            scheduler
+        ));
+    }
+
+    public <R> Work<R> thenCompletable(WorkScheduler scheduler, Function<T, Completable> mapper, BiFunction<T, Done, R> merger) {
+        return append(new PipelineStage.AsyncStage(
+            (val, ignored) -> mapper.apply((T) val).toSingle(() -> Done.INSTANCE).map(res -> merger.apply((T) val, res)),
+            scheduler
+        ));
+    }
+
+    // Composition Operators
+
+    public <R> Work<R> thenChain(Function<T, Work<R>> task) {
+        return append(new PipelineStage.ChainStage(
+            val -> task.apply((T) val)
+        ));
+    }
+
+    public <R, U> Work<U> thenChain(Function<T, Work<R>> task, BiFunction<T, R, U> merger) {
+        return append(new PipelineStage.ChainStage(
+            val -> task.apply((T) val).thenFunction(WorkScheduler.COMPUTE, res -> merger.apply((T) val, res))
+        ));
+    }
+
+    /**
+     * Sequentially chains another work segment, ignoring the result of the current one.
+     */
+    public <R> Work<R> then(Work<R> other) {
+        return thenChain(ignore -> other);
+    }
+
+    public Work<T> peekChain(WorkScheduler scheduler, Function<T, Work<?>> task) {
+        return thenChain(val -> {
+            Work<?> sub = task.apply(val);
             List<PipelineStage> newStages = new java.util.ArrayList<>(sub.getStages());
             newStages.add(new PipelineStage.BreakStage(val));
             return new Work<>(newStages, tag);
@@ -307,17 +279,53 @@ public final class Work<T, C> {
     }
 
     @SuppressWarnings("unchecked")
-    public <U, R> Work<R, C> zipWith(Work<U, ?> other, BiFunction<T, U, R> zipper) {
+    public <U, R> Work<R> zipWith(Work<U> other, BiFunction<T, U, R> zipper) {
         return append(new PipelineStage.ZipStage(
             other,
             (v1, v2) -> zipper.apply((T) v1, (U) v2)
         ));
     }
 
+    /**
+     * Zips multiple work segments into a single list of results.
+     */
+    public Work<List<Object>> zip(WorkScheduler scheduler, Work<?>... others) {
+        Work<List<Object>> current = thenFunction(scheduler, val -> {
+            List<Object> list = new ArrayList<>();
+            list.add(val);
+            return list;
+        });
+
+        for (Work<?> other : others) {
+            current = current.zipWith(other, (list, nextVal) -> {
+                list.add(nextVal);
+                return list;
+            });
+        }
+        return current;
+    }
+
+    /**
+     * Executes one of two pipeline segments based on a condition.
+     */
+    @SuppressWarnings("unchecked")
+    public <R> Work<R> thenBranch(io.reactivex.rxjava3.functions.Predicate<T> condition, Work<R> onTrue, Work<R> onFalse) {
+        return append(new PipelineStage.ChainStage(
+            val -> {
+                try {
+                    if (condition.test((T) val)) return onTrue;
+                    return onFalse;
+                } catch (Throwable e) {
+                    return (Work<R>) (Work<?>) Work.fail(e);
+                }
+            }
+        ));
+    }
+
     // Specialized Operators
 
-    public Work<T, C> require(Predicate<T> condition, Function<T, Throwable> errorSupplier) {
-        return thenFunction(WorkScheduler.COMPUTE, (ctx, t) -> {
+    public Work<T> require(WorkScheduler scheduler, Predicate<T> condition, Function<T, Throwable> errorSupplier) {
+        return thenFunction(scheduler, t -> {
             try {
                 if (condition.test(t)) return t;
                 Throwable error = errorSupplier.apply(t);
@@ -330,8 +338,8 @@ public final class Work<T, C> {
         });
     }
 
-    public Work<T, C> reject(Predicate<T> condition, Function<T, Throwable> errorSupplier) {
-        return thenFunction(WorkScheduler.COMPUTE, (ctx, t) -> {
+    public Work<T> reject(WorkScheduler scheduler, Predicate<T> condition, Function<T, Throwable> errorSupplier) {
+        return thenFunction(scheduler, t -> {
             try {
                 if (!condition.test(t)) return t;
                 Throwable error = errorSupplier.apply(t);
@@ -346,22 +354,26 @@ public final class Work<T, C> {
 
     // Resilience & Recovery
 
-    public Work<T, C> recover(java.util.function.Function<Throwable, T> fallback) {
+    public Work<T> recover(java.util.function.Function<Throwable, T> fallback) {
         return recover(Throwable.class, fallback);
     }
 
-    public Work<T, C> recover(Class<? extends Throwable> type, java.util.function.Function<Throwable, T> fallback) {
+    public Work<T> recover(Class<? extends Throwable> type, java.util.function.Function<Throwable, T> fallback) {
         return append(new PipelineStage.RecoverStage(type, err -> fallback.apply(err)));
     }
 
-    public Work<T, C> retry(int max, long delay, ResiliencePolicy.BackoffStrategy strategy) {
+    public Work<T> retry(int max, long delay, ResiliencePolicy.BackoffStrategy strategy) {
+        return retryIf(max, delay, strategy, err -> true);
+    }
+
+    public Work<T> retryIf(int max, long delay, ResiliencePolicy.BackoffStrategy strategy, java.util.function.Predicate<Throwable> condition) {
         return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
-                new ResiliencePolicy.RetryPolicy(max, delay, strategy),
+                new ResiliencePolicy.RetryPolicy(max, delay, strategy, condition),
                 m.timeout(), m.fallback(), m.compensation()
         ));
     }
 
-    public Work<T, C> timeout(long duration, java.util.concurrent.TimeUnit unit) {
+    public Work<T> timeout(long duration, java.util.concurrent.TimeUnit unit) {
         return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
                 m.retry(),
                 new ResiliencePolicy.TimeoutPolicy(duration, unit),
@@ -369,44 +381,49 @@ public final class Work<T, C> {
         ));
     }
 
-    public Work<T, C> fallback(Work<T, C> fallbackWork) {
+    public Work<T> fallback(Work<T> fallbackWork) {
         return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
                 m.retry(), m.timeout(), fallbackWork, m.compensation()
         ));
     }
 
-    public Work<T, C> compensate(Work<Done, ?> compensationWork) {
+    public Work<T> compensate(Work<Done> compensationWork) {
         return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
                 m.retry(), m.timeout(), m.fallback(), compensationWork
         ));
     }
 
-    private Work<T, C> updateLastResilience(java.util.function.Function<ResiliencePolicy.ResilienceMetadata, ResiliencePolicy.ResilienceMetadata> updater) {
+    /**
+     * Applies a resilience policy to the entire preceding pipeline segment.
+     */
+    public Work<T> resilience(java.util.function.Consumer<ResiliencePolicy.ResilienceBuilder> config) {
+        ResiliencePolicy.ResilienceBuilder builder = new ResiliencePolicy.ResilienceBuilder();
+        config.accept(builder);
+        ResiliencePolicy.ResilienceMetadata m = builder.build();
+
+        Work<T> segment = new Work<>(this.stages, tag);
+        PipelineStage segmentStage = new PipelineStage.ChainStage(val -> segment, m);
+
+        List<PipelineStage> newStages = new ArrayList<>();
+        newStages.add(segmentStage);
+        return new Work<>(newStages, tag);
+    }
+
+    /**
+     * Applies a transformation to this work pipeline.
+     */
+    public <R> Work<R> compose(java.util.function.Function<Work<T>, Work<R>> transformer) {
+        return transformer.apply(this);
+    }
+
+    private Work<T> updateLastResilience(java.util.function.Function<ResiliencePolicy.ResilienceMetadata, ResiliencePolicy.ResilienceMetadata> updater) {
         if (stages.isEmpty()) return this;
 
         List<PipelineStage> newStages = new ArrayList<>(this.stages);
         PipelineStage last = newStages.remove(newStages.size() - 1);
 
         ResiliencePolicy.ResilienceMetadata newM = updater.apply(last.resilience());
-
-        PipelineStage updated;
-        if (last instanceof PipelineStage.SyncStage s) {
-            updated = new PipelineStage.SyncStage(s.task(), s.contextMapper(), s.scheduler(), newM);
-        } else if (last instanceof PipelineStage.AsyncStage s) {
-            updated = new PipelineStage.AsyncStage(s.task(), s.contextMapper(), s.scheduler(), newM);
-        } else if (last instanceof PipelineStage.ChainStage s) {
-            updated = new PipelineStage.ChainStage(s.task(), newM);
-        } else if (last instanceof PipelineStage.RecoverStage s) {
-            updated = new PipelineStage.RecoverStage(s.type(), s.fallback(), newM);
-        } else if (last instanceof PipelineStage.ConditionalBreakStage s) {
-            updated = new PipelineStage.ConditionalBreakStage(s.condition(), s.defaultValue(), newM);
-        } else if (last instanceof PipelineStage.ConditionalFailStage s) {
-            updated = new PipelineStage.ConditionalFailStage(s.condition(), s.error(), newM);
-        } else if (last instanceof PipelineStage.ZipStage s) {
-            updated = new PipelineStage.ZipStage(s.other(), s.zipper(), newM);
-        } else {
-            updated = last;
-        }
+        PipelineStage updated = last.withResilience(newM);
 
         newStages.add(updated);
         return new Work<>(newStages, tag);
@@ -414,22 +431,45 @@ public final class Work<T, C> {
 
     // Breaking & Recovery
 
-    public Work<T, C> thenBreak(T value) {
+    public Work<T> thenBreak(T value) {
         return append(new PipelineStage.BreakStage(value));
     }
 
-    public <R> Work<R, C> thenContinue(R value) {
-        return thenCallable(WorkScheduler.COMPUTE, () -> value);
+    public <R> Work<R> thenContinue(WorkScheduler scheduler, R value) {
+        return thenCallable(scheduler, () -> value);
     }
 
-    public Work<T, C> recoverBreak(T recoveryValue) {
+    public Work<T> recoverBreak(T recoveryValue) {
         return append(new PipelineStage.RecoverBreakStage(recoveryValue));
+    }
+
+    /**
+     * Executes the provided action regardless of success or failure.
+     */
+    public Work<T> doFinally(Runnable action) {
+        return append(new PipelineStage.FinalStage(action));
+    }
+
+    // Debugging & Logging
+
+    /**
+     * Declarative stage to log the current pipeline state.
+     */
+    public Work<T> log(LogLevel level) {
+        return log(level, null);
+    }
+
+    /**
+     * Declarative stage to log the current pipeline state with a custom message.
+     */
+    public Work<T> log(LogLevel level, String message) {
+        return append(new PipelineStage.LogStage(level, message));
     }
 
     // Terminal Operators
 
     public Single<T> asTerminalSingle() {
-        return PipelineCompiler.compile(stages, tag, () -> null);
+        return PipelineCompiler.compile(stages, tag, null);
     }
 
     public Disposable execute() {
@@ -439,7 +479,7 @@ public final class Work<T, C> {
         );
     }
 
-    public Disposable executeOn(WorkScheduler workScheduler, Consumer<T> onSuccess, Consumer<Throwable> onError) {
+    public Disposable executeOn(WorkScheduler workScheduler, io.reactivex.rxjava3.functions.Consumer<T> onSuccess, io.reactivex.rxjava3.functions.Consumer<Throwable> onError) {
         return asTerminalSingle()
                 .observeOn(SchedulerResolver.resolve(workScheduler))
                 .subscribe(onSuccess, onError);

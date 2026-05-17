@@ -47,7 +47,11 @@ public class ResilienceTest {
         .asTerminalSingle()
         .test()
         .awaitDone(2, TimeUnit.SECONDS)
-        .assertError(e -> e.getMessage().contains("Retries exhausted"));
+        .assertError(e -> {
+            Throwable current = e;
+            while (current.getCause() != null && !"Fail".equals(current.getMessage())) current = current.getCause();
+            return "Fail".equals(current.getMessage());
+        });
         
         // 1 initial + 2 retries = 3 total attempts
         assertEquals(3, attempts.get());
@@ -77,7 +81,7 @@ public class ResilienceTest {
         Work.callable(WorkScheduler.IO, () -> {
             throw new RuntimeException("Primary Fail");
         })
-        .fallback(Work.breakWork("Fallback Success"))
+        .fallback(Work.just(WorkScheduler.COMPUTE, "Fallback Success"))
         .asTerminalSingle()
         .test()
         .awaitDone(2, TimeUnit.SECONDS)
@@ -87,11 +91,11 @@ public class ResilienceTest {
     @Test
     public void testCompensationRegistration_SuccessFlow() {
         AtomicInteger compCounter = new AtomicInteger(0);
-        Work<Done, Object> compensation = Work.action(WorkScheduler.DATA_WRITE, (Runnable) compCounter::incrementAndGet);
+        Work<Done> compensation = Work.action(WorkScheduler.DATA_WRITE, (Runnable) compCounter::incrementAndGet);
 
         Work.callable(WorkScheduler.IO, () -> "Step 1")
             .compensate(compensation)
-            .thenFunction(WorkScheduler.COMPUTE, (ctx, s) -> s + " -> Step 2")
+            .thenFunction(WorkScheduler.COMPUTE, s -> s + " -> Step 2")
             .asTerminalSingle()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)

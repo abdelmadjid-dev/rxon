@@ -24,7 +24,7 @@ public class WorkPeekTest {
         AtomicInteger sideEffect = new AtomicInteger(0);
         
         Integer result = Work.callable(WorkScheduler.IO, () -> 42)
-            .peek(val -> sideEffect.set(val))
+            .doOnNext(WorkScheduler.COMPUTE, sideEffect::set)
             .asTerminalSingle()
             .blockingGet();
             

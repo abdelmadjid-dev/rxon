@@ -28,40 +28,35 @@ import java.util.List;
  */
 record PipelineResult<T>(
     T value,
-    Object context,
-    List<Work<Done, ?>> compensationStack,
+    List<Work<Done>> compensationStack,
     boolean terminated
 ) {
-    static <T> PipelineResult<T> of(T value, Object context) {
-        return new PipelineResult<>(value, context, Collections.emptyList(), false);
+    static <T> PipelineResult<T> of(T value) {
+        return new PipelineResult<>(value, Collections.emptyList(), false);
     }
 
-    static <T> PipelineResult<T> of(T value, Object context, List<Work<Done, ?>> compensationStack) {
-        return new PipelineResult<>(value, context, Collections.unmodifiableList(compensationStack), false);
+    static <T> PipelineResult<T> of(T value, List<Work<Done>> compensationStack) {
+        return new PipelineResult<>(value, Collections.unmodifiableList(compensationStack), false);
     }
 
-    static <T> PipelineResult<T> terminated(T value, Object context, List<Work<Done, ?>> compensationStack) {
-        return new PipelineResult<>(value, context, Collections.unmodifiableList(compensationStack), true);
+    static <T> PipelineResult<T> terminated(T value, List<Work<Done>> compensationStack) {
+        return new PipelineResult<>(value, Collections.unmodifiableList(compensationStack), true);
     }
 
     PipelineResult<T> withValue(T newValue) {
-        return new PipelineResult<>(newValue, context, compensationStack, terminated);
+        return new PipelineResult<>(newValue, compensationStack, terminated);
     }
 
-    PipelineResult<T> withContext(Object newContext) {
-        return new PipelineResult<>(value, newContext, compensationStack, terminated);
-    }
-
-    PipelineResult<T> pushCompensation(Work<Done, ?> compensation) {
-        List<Work<Done, ?>> newStack = new ArrayList<>(compensationStack);
+    PipelineResult<T> pushCompensation(Work<Done> compensation) {
+        List<Work<Done>> newStack = new ArrayList<>(compensationStack);
         newStack.add(0, compensation); // LIFO
-        return new PipelineResult<>(value, context, Collections.unmodifiableList(newStack), terminated);
+        return new PipelineResult<>(value, Collections.unmodifiableList(newStack), terminated);
     }
 
-    PipelineResult<T> mergeCompensations(List<Work<Done, ?>> otherStack) {
+    PipelineResult<T> mergeCompensations(List<Work<Done>> otherStack) {
         if (otherStack.isEmpty()) return this;
-        List<Work<Done, ?>> newStack = new ArrayList<>(otherStack);
+        List<Work<Done>> newStack = new ArrayList<>(otherStack);
         newStack.addAll(compensationStack);
-        return new PipelineResult<>(value, context, Collections.unmodifiableList(newStack), terminated);
+        return new PipelineResult<>(value, Collections.unmodifiableList(newStack), terminated);
     }
 }
