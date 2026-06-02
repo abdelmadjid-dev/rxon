@@ -25,6 +25,8 @@ public sealed interface PipelineStage permits
     PipelineStage.FinalStage,
     PipelineStage.LogStage {
 
+    enum ConditioningType { DEBOUNCE, THROTTLE, DISTINCT, BUFFER }
+
     ResiliencePolicy.ResilienceMetadata resilience();
     
     PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience);
@@ -172,8 +174,6 @@ public sealed interface PipelineStage permits
             return new StreamingStage(task, scheduler, resilience);
         }
     }
-
-    enum ConditioningType { DEBOUNCE, THROTTLE, DISTINCT }
 
     record ConditioningStage(
         ConditioningType type,

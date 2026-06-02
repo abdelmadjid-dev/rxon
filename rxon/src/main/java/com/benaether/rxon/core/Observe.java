@@ -25,7 +25,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -113,6 +112,15 @@ public final class Observe<T> {
     }
 
     // Chaining Operators
+
+    public Observe<List<T>> buffer(WorkScheduler scheduler, long time, TimeUnit unit) {
+        return append(new PipelineStage.ConditioningStage(
+                PipelineStage.ConditioningType.BUFFER,
+                time,
+                unit,
+                scheduler
+        ));
+    }
 
     public Observe<Done> thenAction(WorkScheduler scheduler, Runnable action) {
         return append(new PipelineStage.SyncStage(
@@ -418,7 +426,7 @@ public final class Observe<T> {
     // Terminal Operators
 
     public Flowable<T> asFlowable() {
-        return ObserveCompiler.compile(stages, tag, source, null);
+        return ObserveCompiler.compile(stages, tag, source);
     }
 
     public Disposable execute() {

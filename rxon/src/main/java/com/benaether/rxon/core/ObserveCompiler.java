@@ -1,11 +1,11 @@
 package com.benaether.rxon.core;
 
-import com.benaether.rxon.schedulers.WorkScheduler;
 import com.benaether.rxon.scopes.Done;
 import com.benaether.rxon.rx.RxOnLogger;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Single;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -15,29 +15,28 @@ import java.util.concurrent.atomic.AtomicLong;
 final class ObserveCompiler {
 
     @SuppressWarnings("unchecked")
-    static <T> Flowable<T> compile(List<PipelineStage> stages, String tag, Flowable<Object> source, Object initialValue) {
+    static <T> Flowable<T> compile(List<PipelineStage> stages, String tag, Flowable<Object> source) {
         final long pipelineStartTime = System.currentTimeMillis();
         
         // Initialize chain
-        Flowable<PipelineResult<Object>> chain = source.map(val -> PipelineResult.of(val));
+        Flowable<PipelineResult<Object>> chain = source.map(PipelineResult::of);
 
         for (int i = 0; i < stages.size(); i++) {
             PipelineStage stage = stages.get(i);
             final int stageIndex = i;
-            
-            Flowable<PipelineResult<Object>> next = appendToChain(chain, stage);
+            final String stageDesc = stage.toString();
+            final AtomicLong stageStartTime = new AtomicLong();
 
-            // Wrap with logging if debug enabled
             if (RxOnConfig.isDebug()) {
-                final String stageDesc = stage.toString();
-                final AtomicLong stageStartTime = new AtomicLong();
-                
-                // Track timing around the entire stage execution
                 chain = chain.doOnNext(v -> {
                     stageStartTime.set(System.currentTimeMillis());
                     RxOnConfig.getLogger().onStageStart(tag, stageIndex, stageDesc);
                 });
-                
+            }
+
+            Flowable<PipelineResult<Object>> next = appendToChain(chain, stage);
+
+            if (RxOnConfig.isDebug()) {
                 next = next.doOnNext(res -> {
                     long duration = System.currentTimeMillis() - stageStartTime.get();
                     RxOnConfig.getLogger().onStageEnd(tag, stageIndex, stageDesc, duration);
@@ -105,6 +104,17 @@ final class ObserveCompiler {
                 case DISTINCT -> conditioningChain.distinctUntilChanged((p1, p2) -> 
                     java.util.Objects.equals(p1.value(), p2.value())
                 );
+                case BUFFER -> conditioningChain
+                        .buffer(s.time(), s.unit(), SchedulerResolver.resolve(s.scheduler()))
+                        .map(list -> {
+                            List<Object> values = new ArrayList<>(list.size());
+                            List<Work<Done>> combinedCompensations = new ArrayList<>();
+                            for (PipelineResult<Object> result : list) {
+                                values.add(result.value());
+                                combinedCompensations.addAll(result.compensationStack());
+                            }
+                            return new PipelineResult<>(values, combinedCompensations, false);
+                        });
             };
         } else if (stage instanceof PipelineStage.ChainStage s) {
             return chain.concatMapSingle(prev -> {
