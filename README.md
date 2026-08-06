@@ -17,7 +17,7 @@ RxOn is a semantic DSL wrapper for RxJava 3 that enforces architectural patterns
 ### Gradle
 ```kotlin
 dependencies {
-    implementation("com.benaether:rxon:0.3.0-alpha5")
+    implementation("com.benaether:rxon:0.3.0-alpha7")
 }
 ```
 
@@ -26,6 +26,8 @@ dependencies {
 ### Changelogs
 | Version | Documentation | Description |
 | :--- | :--- | :--- |
+| **v0.3.0-alpha7** | [Release Notes](changelogs/v0.3.0-alpha7.md) | Refined Configuration DSL and Error Mapping Pipeline. |
+| **v0.3.0-alpha6** | [Release Notes](changelogs/v0.3.0-alpha6.md) | (Previously released without persisted changelog) |
 | **v0.3.0-alpha5** | [Release Notes](changelogs/v0.3.0-alpha5.md) | Single-Generic Simplification, Smart Branching, Segment Resilience, and Composition. |
 | **v0.3.0-alpha4** | [Release Notes](changelogs/v0.3.0-alpha4.md) | Explicit naming symmetry, lazy Observe parity, and logging infrastructure. |
 | **v0.3.0-alpha3** | [Release Notes](changelogs/v0.3.0-alpha3.md) | Semantic flow control, SAGA rollback support, and pipeline recovery. |
@@ -66,6 +68,18 @@ Work.callable(WorkScheduler.IO, () -> api.fetchPart1())
     )
     .execute();
 ```
+
+## Development & Contributing
+
+### Git Hooks
+To ensure commit message quality and release integrity, please install the project's Git hooks:
+```bash
+./gradlew installGitHooks
+```
+This will enforce:
+- **Conventional Commits**: Commit messages must follow the `type(scope): description` format.
+- **Pre-commit Release Check**: Automatically runs `./gradlew verifyRelease` on every commit to ensure the project remains in a release-ready state.
+- **Release Guard**: Pushing a tag (`v*`) will trigger mandatory checks for version alignment.
 
 ## License
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.

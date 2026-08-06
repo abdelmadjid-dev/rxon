@@ -20,6 +20,9 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    - name: Verify Release Integrity
+      run: ./gradlew verifyRelease --no-configuration-cache
+
     - name: Publish to Maven Central
       run: ./gradlew :rxon:publishToCentralPortal --no-configuration-cache
       env:

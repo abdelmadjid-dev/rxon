@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.benaether"
-version = "0.3.0-alpha6"
+version = "0.3.0-alpha7"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17

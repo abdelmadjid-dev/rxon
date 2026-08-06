@@ -47,11 +47,8 @@ public final class RxOnConfig {
      * @return mapped throwable
      */
     public static Throwable mapError(Throwable t) {
-        Throwable mapped = rxOnErrorMapper.map(t);
-        if (cleanStackTrace) {
-            return StackTraceCleaner.clean(mapped);
-        }
-        return mapped;
+        Throwable toMap = cleanStackTrace ? StackTraceCleaner.clean(t) : t;
+        return rxOnErrorMapper.map(toMap);
     }
 
     /** @return true if debug mode is enabled */
@@ -86,19 +83,22 @@ public final class RxOnConfig {
     public interface LoggerStep {
         /** @param rxOnLogger custom logger
          * @return next step */
-        ErrorMapperStep logger(RxOnLogger rxOnLogger);
+        StackTraceStep logger(RxOnLogger rxOnLogger);
     }
 
-    /** Step for error mapper configuration */
-    public interface ErrorMapperStep {
-        /** @param mapper custom error mapper
-         * @return next step */
-        BuildStep errorMapper(RxOnErrorMapper mapper);
-
+    /** Step for stacktrace cleaning configuration */
+    public interface StackTraceStep extends ErrorMapperStep {
         /** Enable automatic stacktrace cleaning for all errors
          * @param enabled enable cleaning
          * @return next step */
-        BuildStep cleanStackTrace(boolean enabled);
+        ErrorMapperStep cleanStackTrace(boolean enabled);
+    }
+
+    /** Step for error mapper configuration */
+    public interface ErrorMapperStep extends BuildStep {
+        /** @param mapper custom error mapper
+         * @return next step */
+        BuildStep errorMapper(RxOnErrorMapper mapper);
     }
 
     /** Step for final configuration and initialization */
@@ -116,7 +116,7 @@ public final class RxOnConfig {
         return new Builder();
     }
 
-    private static class Builder implements DebugStep, LoggerStep, ErrorMapperStep, BuildStep {
+    private static class Builder implements DebugStep, LoggerStep, StackTraceStep, ErrorMapperStep, BuildStep {
         private boolean isDebug;
         private boolean cleanStackTrace;
         private RxOnLogger rxOnLogger;
@@ -130,20 +130,20 @@ public final class RxOnConfig {
         }
 
         @Override
-        public ErrorMapperStep logger(RxOnLogger rxOnLogger) {
+        public StackTraceStep logger(RxOnLogger rxOnLogger) {
             this.rxOnLogger = rxOnLogger;
+            return this;
+        }
+
+        @Override
+        public ErrorMapperStep cleanStackTrace(boolean enabled) {
+            this.cleanStackTrace = enabled;
             return this;
         }
 
         @Override
         public BuildStep errorMapper(RxOnErrorMapper mapper) {
             this.rxOnErrorMapper = mapper;
-            return this;
-        }
-
-        @Override
-        public BuildStep cleanStackTrace(boolean enabled) {
-            this.cleanStackTrace = enabled;
             return this;
         }
 

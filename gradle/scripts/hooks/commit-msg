@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Regex for Conventional Commits
+# feat|fix|docs|style|refactor|perf|test|chore|build|ci: description
+# Optional scope: feat(auth): description
+# Optional breaking change: feat!: description
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+REGEX="^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\(.*\))?(!)?:\ .+"
+
+if ! echo "$COMMIT_MSG" | grep -Eq "$REGEX"; then
+    echo "ERROR: Invalid commit message format."
+    echo "Expected format: <type>(<scope>): <description>"
+    echo "Example: feat(api): add new error mapping logic"
+    echo "Allowed types: feat, fix, docs, style, refactor, perf, test, chore, build, ci"
+    exit 1
+fi
