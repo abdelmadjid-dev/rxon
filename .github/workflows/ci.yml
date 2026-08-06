@@ -22,4 +22,6 @@ jobs:
       run: chmod +x gradlew
       
     - name: Build with Gradle
-      run: ./gradlew build verifyRelease --no-configuration-cache
+      run: ./gradlew build --no-configuration-cache
+    - name: Verify Release Integrity
+      run: sh gradle/scripts/verify_release.sh

@@ -72,11 +72,9 @@ Work.callable(WorkScheduler.IO, () -> api.fetchPart1())
 ## Development & Contributing
 
 ### Git Hooks
-To ensure commit message quality and release integrity, please install the project's Git hooks:
-```bash
-./gradlew installGitHooks
-```
-This will enforce:
+The project uses Git hooks to ensure commit message quality and release integrity. These are **automatically installed** during the first Gradle build or IDE sync.
+
+The hooks enforce:
 - **Conventional Commits**: Commit messages must follow the `type(scope): description` format.
 - **Pre-commit Release Check**: Automatically runs `./gradlew verifyRelease` on every commit to ensure the project remains in a release-ready state.
 - **Release Guard**: Pushing a tag (`v*`) will trigger mandatory checks for version alignment.

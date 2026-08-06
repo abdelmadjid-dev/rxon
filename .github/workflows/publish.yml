@@ -21,7 +21,7 @@ jobs:
       run: chmod +x gradlew
 
     - name: Verify Release Integrity
-      run: ./gradlew verifyRelease --no-configuration-cache
+      run: sh gradle/scripts/verify_release.sh
 
     - name: Publish to Maven Central
       run: ./gradlew :rxon:publishToCentralPortal --no-configuration-cache

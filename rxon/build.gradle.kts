@@ -8,6 +8,8 @@ plugins {
 group = "com.benaether"
 version = "0.3.0-alpha7"
 
+apply(from = "../gradle/scripts/release-checks.gradle.kts")
+
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17

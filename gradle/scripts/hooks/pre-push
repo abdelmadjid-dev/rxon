@@ -1,6 +1,5 @@
 #!/bin/sh
 
-# Detect if we are pushing a release tag (v*)
 IS_RELEASE_PUSH=false
 
 while read local_ref local_sha remote_ref remote_sha
@@ -15,20 +14,18 @@ done
 if [ "$IS_RELEASE_PUSH" = true ]; then
     echo "Release tag push detected ($TAG_NAME). Running mandatory release checks..."
 
-    # Run the Gradle verification task
-    ./gradlew verifyRelease --no-configuration-cache
+    # Run the standalone verification script
+    sh gradle/scripts/verify_release.sh
 
     if [ $? -ne 0 ]; then
         echo "ERROR: Release checks failed. Push aborted."
-        echo "Please ensure changelogs, migrations, and README are updated for $TAG_NAME."
         exit 1
     fi
 
     # Verify that the tag matches the project version
-    PROJECT_VERSION=$(./gradlew :rxon:properties -q | grep "^version:" | awk '{print $2}')
+    PROJECT_VERSION=$(grep "version =" rxon/build.gradle.kts | sed -E 's/version = "(.*)"/\1/')
     if [ "v$PROJECT_VERSION" != "$TAG_NAME" ]; then
         echo "ERROR: Tag name ($TAG_NAME) does not match project version (v$PROJECT_VERSION)."
-        echo "Aborting push. Please align the version in rxon/build.gradle.kts with the tag."
         exit 1
     fi
 
