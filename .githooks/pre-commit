@@ -2,8 +2,8 @@
 
 echo "Running pre-commit release checks..."
 
-# Run the standalone verification script
-sh gradle/scripts/verify_release.sh
+# Run the standalone verification script from the local directory
+sh "$(dirname "$0")/verify_release.sh"
 
 if [ $? -ne 0 ]; then
     echo "ERROR: Release verification failed. Commit aborted."

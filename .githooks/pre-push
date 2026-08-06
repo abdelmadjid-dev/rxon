@@ -14,8 +14,8 @@ done
 if [ "$IS_RELEASE_PUSH" = true ]; then
     echo "Release tag push detected ($TAG_NAME). Running mandatory release checks..."
 
-    # Run the standalone verification script
-    sh gradle/scripts/verify_release.sh
+    # Run the standalone verification script from the local directory
+    sh "$(dirname "$0")/verify_release.sh"
 
     if [ $? -ne 0 ]; then
         echo "ERROR: Release checks failed. Push aborted."

@@ -76,8 +76,8 @@ The project uses Git hooks to ensure commit message quality and release integrit
 
 The hooks enforce:
 - **Conventional Commits**: Commit messages must follow the `type(scope): description` format.
-- **Pre-commit Release Check**: Automatically runs `./gradlew verifyRelease` on every commit to ensure the project remains in a release-ready state.
-- **Release Guard**: Pushing a tag (`v*`) will trigger mandatory checks for version alignment.
+- **Pre-commit Release Check**: Automatically runs the release verification script on every commit to ensure the project remains in a release-ready state.
+- **Release Guard**: Pushing a tag (`v*`) will trigger mandatory checks for version alignment and documentation.
 
 ## License
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
