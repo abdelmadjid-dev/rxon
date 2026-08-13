@@ -48,7 +48,8 @@ public final class RxOnConfig {
      */
     public static Throwable mapError(Throwable t) {
         Throwable toMap = cleanStackTrace ? StackTraceCleaner.clean(t) : t;
-        return rxOnErrorMapper.map(toMap);
+        Throwable mapped = rxOnErrorMapper.map(toMap);
+        return cleanStackTrace ? StackTraceCleaner.clean(mapped) : mapped;
     }
 
     /** @return true if debug mode is enabled */

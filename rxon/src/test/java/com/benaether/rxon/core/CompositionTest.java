@@ -21,7 +21,6 @@ public class CompositionTest {
 
     @Test
     public void testWork_Composition() {
-        // Define a reusable transformer
         Function<Work<String>, Work<String>> withSuffix = 
             work -> work.thenFunction(WorkScheduler.COMPUTE, val -> val + "_Suffix");
 

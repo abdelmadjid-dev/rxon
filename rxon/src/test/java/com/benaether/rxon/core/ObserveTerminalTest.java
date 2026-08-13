@@ -28,7 +28,6 @@ public class ObserveTerminalTest {
             .thenConsumer(WorkScheduler.COMPUTE, v -> count.incrementAndGet())
             .execute();
             
-        // Wait a bit for execution
         try { Thread.sleep(500); } catch (InterruptedException e) {}
         
         assertEquals(3, count.get());
@@ -48,11 +47,8 @@ public class ObserveTerminalTest {
                 e -> {}
             );
 
-        // Wait a bit for execution
         try { Thread.sleep(500); } catch (InterruptedException e) {}
         
         assertEquals(1, count.get());
-        // Since we used COMPUTE, the thread name should likely contain RxCompute or similar 
-        // (depending on SchedulerResolver implementation)
     }
 }

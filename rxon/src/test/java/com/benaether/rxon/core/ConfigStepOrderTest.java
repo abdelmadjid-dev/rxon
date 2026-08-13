@@ -17,6 +17,7 @@
 package com.benaether.rxon.core;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import com.benaether.rxon.rx.RxOnLogger;
@@ -41,27 +42,19 @@ public class ConfigStepOrderTest {
         RxOnConfig.builder()
                 .debug(true)
                 .logger(DUMMY_LOGGER)
-                .cleanStackTrace(true) // Should be available before errorMapper
+                .cleanStackTrace(true)
                 .errorMapper(new RxOnErrorMapper() {
                     @Override
                     public Throwable map(Throwable t) {
                         mapperCalled.set(true);
-                        // Verify that stacktrace is already cleaned when it reaches the mapper
-                        for (StackTraceElement element : t.getStackTrace()) {
-                            assertFalse("Stacktrace should not contain noise: " + element.getClassName(),
-                                    element.getClassName().startsWith("io.reactivex.rxjava3"));
-                        }
+                        assertNull("RxJavaAssemblyException cause should be unlinked before reaching mapper", t.getCause());
                         return t;
                     }
                 })
                 .init();
 
-        Throwable noiseException = new RuntimeException("test");
-        // Manually set a stacktrace that contains noise
-        noiseException.setStackTrace(new StackTraceElement[]{
-                new StackTraceElement("io.reactivex.rxjava3.core.Observable", "subscribe", "Observable.java", 1),
-                new StackTraceElement("com.example.App", "main", "App.java", 1)
-        });
+        Throwable assemblyWrapper = new StackTraceCleanerTest.DummyAssemblyException("assembled", null);
+        Throwable noiseException = new RuntimeException("test", assemblyWrapper);
 
         RxOnConfig.mapError(noiseException);
         assertTrue("Mapper should have been called", mapperCalled.get());

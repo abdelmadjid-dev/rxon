@@ -78,7 +78,6 @@ public final class RxOnInitializer extends ContentProvider {
         return true;
     }
 
-    // boilerplate
     @Nullable @Override public Cursor query(@NonNull Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) { return null; }
     @Nullable @Override public String getType(@NonNull Uri uri) { return null; }
     @Nullable @Override public Uri insert(@NonNull Uri uri, ContentValues values) { return null; }

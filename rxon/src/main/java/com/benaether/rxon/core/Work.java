@@ -77,8 +77,6 @@ public final class Work<T> {
         return new Work<>(this.stages, name);
     }
 
-    // Entry Points
-
     public static <T> Work<T> just(WorkScheduler scheduler, T value) {
         return new Work<Object>(new ArrayList<>(), "Work").thenCallable(scheduler, () -> value);
     }
@@ -101,6 +99,34 @@ public final class Work<T> {
 
     public static Work<Done> completable(WorkScheduler scheduler, Completable source) {
         return new Work<Object>(new ArrayList<>(), "Work").thenCompletable(scheduler, val -> source);
+    }
+
+    public static Work<Done> completableEmitter(WorkScheduler scheduler, io.reactivex.rxjava3.functions.Consumer<io.reactivex.rxjava3.core.CompletableEmitter> body) {
+        return Work.completable(scheduler, Completable.create(emitter -> {
+            try {
+                body.accept(emitter);
+            } catch (Throwable t) {
+                if (!emitter.isDisposed()) {
+                    emitter.onError(t);
+                }
+            }
+        }));
+    }
+
+    public static <R> Work<R> singleEmitter(WorkScheduler scheduler, io.reactivex.rxjava3.functions.Consumer<io.reactivex.rxjava3.core.SingleEmitter<R>> body) {
+        return Work.single(scheduler, Single.create(emitter -> {
+            try {
+                body.accept(emitter);
+            } catch (Throwable t) {
+                if (!emitter.isDisposed()) {
+                    emitter.onError(t);
+                }
+            }
+        }));
+    }
+
+    public static Work<Long> timer(WorkScheduler scheduler, long delay, java.util.concurrent.TimeUnit unit) {
+        return Work.single(scheduler, Single.timer(delay, unit));
     }
 
     public static Work<Done> consumer(WorkScheduler scheduler, java.util.function.Consumer<Object> action) {
@@ -138,11 +164,10 @@ public final class Work<T> {
         }));
     }
 
-    public static Work<Done> fail(Throwable error) {
-        return new Work<Done>(new ArrayList<>()).append(new PipelineStage.FailStage(error));
+    @SuppressWarnings("unchecked")
+    public static <R> Work<R> fail(Throwable error) {
+        return (Work<R>) (Work<?>) new Work<Object>(new ArrayList<>()).append(new PipelineStage.FailStage(error));
     }
-
-    // Chaining Operators
 
     public Work<Done> thenAction(WorkScheduler scheduler, Runnable action) {
         return append(new PipelineStage.SyncStage(
@@ -248,8 +273,6 @@ public final class Work<T> {
         ));
     }
 
-    // Composition Operators
-
     public <R> Work<R> thenChain(Function<T, Work<R>> task) {
         return append(new PipelineStage.ChainStage(
             val -> task.apply((T) val)
@@ -322,8 +345,6 @@ public final class Work<T> {
         ));
     }
 
-    // Specialized Operators
-
     public Work<T> require(WorkScheduler scheduler, Predicate<T> condition, Function<T, Throwable> errorSupplier) {
         return thenFunction(scheduler, t -> {
             try {
@@ -352,8 +373,6 @@ public final class Work<T> {
         });
     }
 
-    // Resilience & Recovery
-
     public Work<T> recover(java.util.function.Function<Throwable, T> fallback) {
         return recover(Throwable.class, fallback);
     }
@@ -374,10 +393,25 @@ public final class Work<T> {
     }
 
     public Work<T> timeout(long duration, java.util.concurrent.TimeUnit unit) {
+        return timeout(duration, unit, (Throwable) null);
+    }
+
+    public Work<T> timeout(long duration, java.util.concurrent.TimeUnit unit, String customMessage) {
+        return timeout(duration, unit, new java.util.concurrent.TimeoutException(customMessage));
+    }
+
+    public Work<T> timeout(long duration, java.util.concurrent.TimeUnit unit, Throwable customError) {
         return updateLastResilience(m -> new ResiliencePolicy.ResilienceMetadata(
                 m.retry(),
-                new ResiliencePolicy.TimeoutPolicy(duration, unit),
+                new ResiliencePolicy.TimeoutPolicy(duration, unit, customError),
                 m.fallback(), m.compensation()
+        ));
+    }
+
+    public Work<T> delay(WorkScheduler scheduler, long delay, java.util.concurrent.TimeUnit unit) {
+        return append(new PipelineStage.AsyncStage(
+            (val, ignored) -> Single.just(val).delay(delay, unit, SchedulerResolver.resolve(scheduler)),
+            scheduler
         ));
     }
 
@@ -429,8 +463,6 @@ public final class Work<T> {
         return new Work<>(newStages, tag);
     }
 
-    // Breaking & Recovery
-
     public Work<T> thenBreak(T value) {
         return append(new PipelineStage.BreakStage(value));
     }
@@ -450,38 +482,28 @@ public final class Work<T> {
         return append(new PipelineStage.FinalStage(action));
     }
 
-    // Debugging & Logging
-
-    /**
-     * Declarative stage to log the current pipeline state.
-     */
     public Work<T> log(LogLevel level) {
         return log(level, null);
     }
 
-    /**
-     * Declarative stage to log the current pipeline state with a custom message.
-     */
     public Work<T> log(LogLevel level, String message) {
         return append(new PipelineStage.LogStage(level, message));
     }
-
-    // Terminal Operators
 
     public Single<T> asTerminalSingle() {
         return PipelineCompiler.compile(stages, tag, null);
     }
 
     public Disposable execute() {
-        return asTerminalSingle().subscribe(
-                t -> { },
-                throwable -> RxLog.e(TAG, "Unhandled Throwable", throwable)
-        );
+        return PipelineSubscriber.subscribe(asTerminalSingle(), null, null, TAG);
     }
 
     public Disposable executeOn(WorkScheduler workScheduler, io.reactivex.rxjava3.functions.Consumer<T> onSuccess, io.reactivex.rxjava3.functions.Consumer<Throwable> onError) {
-        return asTerminalSingle()
-                .observeOn(SchedulerResolver.resolve(workScheduler))
-                .subscribe(onSuccess, onError);
+        return PipelineSubscriber.subscribe(
+                asTerminalSingle().observeOn(SchedulerResolver.resolve(workScheduler)),
+                onSuccess,
+                onError,
+                TAG
+        );
     }
 }

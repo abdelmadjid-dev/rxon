@@ -53,7 +53,6 @@ public class ResilienceTest {
             return "Fail".equals(current.getMessage());
         });
         
-        // 1 initial + 2 retries = 3 total attempts
         assertEquals(3, attempts.get());
     }
 
@@ -89,7 +88,7 @@ public class ResilienceTest {
     }
 
     @Test
-    public void testCompensationRegistration_SuccessFlow() {
+    public void testCompensate_DoesNotTriggerOnSuccess() {
         AtomicInteger compCounter = new AtomicInteger(0);
         Work<Done> compensation = Work.action(WorkScheduler.DATA_WRITE, (Runnable) compCounter::incrementAndGet);
 
@@ -101,7 +100,6 @@ public class ResilienceTest {
             .awaitDone(2, TimeUnit.SECONDS)
             .assertValue("Step 1 -> Step 2");
 
-        // Compensation should NOT run on success
         assertEquals(0, compCounter.get());
     }
 }

@@ -50,8 +50,6 @@ public interface RxOnLogger {
      */
     void d(String tag, String message);
 
-    // Pipeline Lifecycle Hooks
-
     /**
      * Called when a pipeline stage starts.
      */

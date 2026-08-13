@@ -42,8 +42,13 @@ public final class ResiliencePolicy {
 
     public record TimeoutPolicy(
         long duration,
-        TimeUnit unit
-    ) {}
+        TimeUnit unit,
+        Throwable customError
+    ) {
+        public TimeoutPolicy(long duration, TimeUnit unit) {
+            this(duration, unit, null);
+        }
+    }
 
     /**
      * Container for all resilience metadata attached to a stage.
@@ -80,7 +85,15 @@ public final class ResiliencePolicy {
         }
 
         public ResilienceBuilder timeout(long duration, TimeUnit unit) {
-            this.timeout = new TimeoutPolicy(duration, unit);
+            return timeout(duration, unit, (Throwable) null);
+        }
+
+        public ResilienceBuilder timeout(long duration, TimeUnit unit, String customMessage) {
+            return timeout(duration, unit, new java.util.concurrent.TimeoutException(customMessage));
+        }
+
+        public ResilienceBuilder timeout(long duration, TimeUnit unit, Throwable customError) {
+            this.timeout = new TimeoutPolicy(duration, unit, customError);
             return this;
         }
 

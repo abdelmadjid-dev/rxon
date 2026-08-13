@@ -54,7 +54,7 @@ public class ObserveParityTest {
             .asFlowable()
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
-            .assertValues(0, 0, 1); // 10/10=1 -> range(0,1) -> 0; 20/10=2 -> range(0,2) -> 0,1
+            .assertValues(0, 0, 1);
 
         assertEquals(30, counter.get());
     }

@@ -78,7 +78,7 @@ public class WorkCompositionTest {
             .thenConsumer(WorkScheduler.MAIN, count::addAndGet);
             
         Integer result = pipeline.asTerminalSingle().blockingGet();
-        assertEquals(Integer.valueOf(1), result); // Pipeline value should remain unchanged
+        assertEquals(Integer.valueOf(1), result);
         assertEquals(4, count.get());
     }
 }

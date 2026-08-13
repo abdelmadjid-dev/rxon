@@ -18,7 +18,6 @@ final class ObserveCompiler {
     static <T> Flowable<T> compile(List<PipelineStage> stages, String tag, Flowable<Object> source) {
         final long pipelineStartTime = System.currentTimeMillis();
         
-        // Initialize chain
         Flowable<PipelineResult<Object>> chain = source.map(PipelineResult::of);
 
         for (int i = 0; i < stages.size(); i++) {
@@ -43,7 +42,6 @@ final class ObserveCompiler {
                 });
             }
 
-            // Apply resilience policy for this stage
             chain = applyResilience(next, stage);
         }
 
@@ -61,9 +59,11 @@ final class ObserveCompiler {
 
         return chain.onErrorResumeNext(err -> {
             if (err instanceof PipelineException pe) {
-                return PipelineCompiler.runCompensations(pe.getCompensationStack(), pe.getValue(), pe.getCause()).toFlowable();
+                return PipelineCompiler.runCompensations(pe.getCompensationStack(), pe.getValue(), pe.getCause())
+                    .toFlowable()
+                    .onErrorResumeNext(compErr -> Flowable.error(RxOnConfig.mapError(compErr)));
             }
-            return Flowable.error(err);
+            return Flowable.error(RxOnConfig.mapError(err));
         }).map(res -> (T) res.value());
     }
 
@@ -210,12 +210,10 @@ final class ObserveCompiler {
         
         Flowable<PipelineResult<Object>> current = stageFlowable;
 
-        // 1. Timeout
         if (m.hasTimeout()) {
             current = current.timeout(m.timeout().duration(), m.timeout().unit());
         }
 
-        // 2. Retry
         if (m.hasRetry()) {
             final int max = m.retry().maxRetries();
             final long delay = m.retry().delayMs();
@@ -237,12 +235,10 @@ final class ObserveCompiler {
             }));
         }
 
-        // 3. Compensation Registration (on Success)
         if (m.hasCompensation()) {
             current = current.map(res -> res.pushCompensation((Work<Done>) m.compensation()));
         }
 
-        // 4. Fallback or Compensation (on Failure)
         current = current.onErrorResumeNext(err -> {
             if (m.hasFallback()) {
                 Object failedValue = (err instanceof PipelineException pe) ? pe.getValue() : null;

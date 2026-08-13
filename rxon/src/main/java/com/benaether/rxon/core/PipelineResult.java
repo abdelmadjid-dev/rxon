@@ -49,7 +49,7 @@ record PipelineResult<T>(
 
     PipelineResult<T> pushCompensation(Work<Done> compensation) {
         List<Work<Done>> newStack = new ArrayList<>(compensationStack);
-        newStack.add(0, compensation); // LIFO
+        newStack.add(0, compensation);
         return new PipelineResult<>(value, Collections.unmodifiableList(newStack), terminated);
     }
 

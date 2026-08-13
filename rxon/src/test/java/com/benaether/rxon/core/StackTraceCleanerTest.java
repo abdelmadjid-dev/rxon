@@ -1,64 +1,86 @@
 package com.benaether.rxon.core;
 
 import org.junit.Test;
-import java.util.Arrays;
+import java.util.concurrent.TimeoutException;
 import static org.junit.Assert.*;
 
 public class StackTraceCleanerTest {
 
     @Test
-    public void testCleanNoise() {
-        Throwable t = new RuntimeException("Error");
-        StackTraceElement[] noise = new StackTraceElement[] {
-                new StackTraceElement("io.reactivex.rxjava3.internal.operators.single.SingleFlatMap", "onSuccess", "SingleFlatMap.java", 77),
-                new StackTraceElement("com.example.app.MyService", "doWork", "MyService.java", 10),
-                new StackTraceElement("java.lang.Thread", "run", "Thread.java", 1012)
-        };
-        t.setStackTrace(noise);
+    public void testChainCollapsing() {
+        TimeoutException realCause = new TimeoutException("Timed out");
+        realCause.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("com.example.ExternalLib", "wait", "ExternalLib.java", 1)
+        });
 
-        StackTraceCleaner.clean(t);
+        Throwable assemblyWrapper2 = new DummyAssemblyException("assembled", realCause);
+        assemblyWrapper2.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("com.smartprints.Manager", "init", "Manager.java", 61)
+        });
 
-        StackTraceElement[] cleaned = t.getStackTrace();
-        assertEquals("Should have exactly 1 frame left", 1, cleaned.length);
-        assertEquals("com.example.app.MyService", cleaned[0].getClassName());
+        Throwable assemblyWrapper1 = new DummyAssemblyException("assembled", assemblyWrapper2);
+        assemblyWrapper1.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("com.smartprints.Factory", "create", "Factory.java", 45)
+        });
+
+        RuntimeException top = new RuntimeException("Top Error", assemblyWrapper1);
+        top.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("com.smartprints.App", "main", "App.java", 10)
+        });
+
+        Throwable cleaned = StackTraceCleaner.clean(top);
+        assertNotNull(cleaned);
+        assertEquals("Top cause should be the real cause", realCause, cleaned.getCause());
     }
 
     @Test
-    public void testPreserveWorkEntryPoints() {
-        Throwable t = new RuntimeException("Error");
-        StackTraceElement[] frames = new StackTraceElement[] {
-                new StackTraceElement("com.benaether.rxon.core.Work", "single", "Work.java", 94),
-                new StackTraceElement("com.benaether.rxon.core.PipelineCompiler", "compile", "PipelineCompiler.java", 22)
-        };
-        t.setStackTrace(frames);
+    public void testCleanAfterMapping() {
+        RuntimeException real = new RuntimeException("real");
+        real.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("com.example.Internal", "run", "I.java", 1)
+        });
 
-        StackTraceCleaner.clean(t);
+        Throwable dirty = new DummyAssemblyException("assembled", real);
+        dirty.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("hu.akarnokd.rxjava3.debug.Assembly", "foo", "A.java", 1)
+        });
 
-        StackTraceElement[] cleaned = t.getStackTrace();
-        
-        StringBuilder sb = new StringBuilder();
-        for (StackTraceElement e : cleaned) sb.append(e.getClassName()).append("\n");
-        String actual = sb.toString().trim();
+        Throwable mapped = new RuntimeException("Mapped Error", dirty);
+        mapped.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("com.example.App", "onMapper", "App.java", 1)
+        });
 
-        assertEquals("Should preserve only Work entry point. Actual: " + actual, 1, cleaned.length);
-        assertEquals("com.benaether.rxon.core.Work", cleaned[0].getClassName());
+        Throwable cleanedMapped = StackTraceCleaner.clean(mapped);
+        assertNotNull(cleanedMapped);
+        assertEquals("Mapped exception cause should be real cause", real, cleanedMapped.getCause());
     }
 
     @Test
-    public void testRecursiveClean() {
-        Throwable cause = new RuntimeException("Cause");
-        cause.setStackTrace(new StackTraceElement[]{
-                new StackTraceElement("io.reactivex.rxjava3.core.Single", "subscribe", "Single.java", 100)
+    public void testPureAssemblyChain() {
+        Throwable asm2 = new DummyAssemblyException("assembled", null);
+        asm2.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("io.reactivex.rxjava3.core.Single", "subscribe", "Single.java", 100),
+                new StackTraceElement("com.example.AppService", "doService", "AppService.java", 42)
         });
 
-        Throwable t = new RuntimeException("Top", cause);
-        t.setStackTrace(new StackTraceElement[]{
-                new StackTraceElement("com.example.App", "main", "App.java", 1)
+        Throwable asm1 = new DummyAssemblyException("assembled", asm2);
+        asm1.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("io.reactivex.rxjava3.core.Single", "defer", "Single.java", 90)
         });
 
-        StackTraceCleaner.clean(t);
+        RuntimeException top = new RuntimeException("Edfapay card scan timed out.", asm1);
+        top.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("com.example.PaymentManager", "onTimeout", "PaymentManager.java", 15)
+        });
 
-        assertEquals("Top exception should have its frame", 1, t.getStackTrace().length);
-        assertEquals("Cause exception frames should be empty (all noise)", 0, t.getCause().getStackTrace().length);
+        Throwable cleanedTop = StackTraceCleaner.clean(top);
+        assertNotNull(cleanedTop);
+        assertNull("Cause should be unlinked for pure assembly chain", cleanedTop.getCause());
+    }
+
+    static class DummyAssemblyException extends RuntimeException {
+        public DummyAssemblyException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }

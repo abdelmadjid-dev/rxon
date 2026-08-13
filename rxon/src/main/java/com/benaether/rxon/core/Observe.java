@@ -74,14 +74,9 @@ public final class Observe<T> {
         return tag;
     }
 
-    /**
-     * Assign a semantic name to this Observe instance for debugging purposes.
-     */
     public Observe<T> tag(String name) {
         return new Observe<>(this.source, this.stages, name);
     }
-
-    // Entry Points
 
     public static <T> Observe<T> flow(WorkScheduler scheduler, Flowable<T> source) {
         return new Observe<>(
@@ -110,8 +105,6 @@ public final class Observe<T> {
     public static Observe<Done> completable(WorkScheduler scheduler, Completable source) {
         return flow(scheduler, source.toFlowable());
     }
-
-    // Chaining Operators
 
     public Observe<List<T>> buffer(WorkScheduler scheduler, long time, TimeUnit unit) {
         return append(new PipelineStage.ConditioningStage(
@@ -226,8 +219,6 @@ public final class Observe<T> {
         ));
     }
 
-    // Streaming Chaining
-
     public <R> Observe<R> thenFlowable(WorkScheduler scheduler, Function<T, Flowable<R>> mapper) {
         return append(new PipelineStage.StreamingStage(
             (val, ignored) -> (Flowable<Object>) (Flowable<?>) mapper.apply((T) val),
@@ -251,9 +242,6 @@ public final class Observe<T> {
         ));
     }
 
-    /**
-     * Executes one of two pipeline segments based on a condition for each emission.
-     */
     @SuppressWarnings("unchecked")
     public <R> Observe<R> thenBranch(io.reactivex.rxjava3.functions.Predicate<T> condition, Work<R> onTrue, Work<R> onFalse) {
         return append(new PipelineStage.ChainStage(
@@ -268,8 +256,6 @@ public final class Observe<T> {
         ));
     }
 
-    // Composition Operators
-
     @SuppressWarnings("unchecked")
     public <U, R> Observe<R> zipWith(Work<U> other, BiFunction<T, U, R> zipper) {
         return append(new PipelineStage.ZipStage(
@@ -278,9 +264,6 @@ public final class Observe<T> {
         ));
     }
 
-    /**
-     * Zips each emission with multiple work segments.
-     */
     public Observe<List<Object>> zip(WorkScheduler scheduler, Work<?>... others) {
         Observe<List<Object>> current = thenFunction(scheduler, val -> {
             List<Object> list = new ArrayList<>();
@@ -297,8 +280,6 @@ public final class Observe<T> {
         return current;
     }
 
-    // Signal Conditioning (Lazy)
-
     public Observe<T> debounce(WorkScheduler scheduler, long time, TimeUnit unit) {
         return append(new PipelineStage.ConditioningStage(PipelineStage.ConditioningType.DEBOUNCE, time, unit, scheduler));
     }
@@ -311,21 +292,13 @@ public final class Observe<T> {
         return append(new PipelineStage.ConditioningStage(PipelineStage.ConditioningType.DISTINCT, scheduler));
     }
 
-    /**
-     * Converts the cold stream into a hot shared stream for multiple subscribers.
-     */
     public Observe<T> share(WorkScheduler scheduler) {
         return new Observe<>(source.observeOn(SchedulerResolver.resolve(scheduler)).share(), stages, tag);
     }
 
-    /**
-     * Configures the backpressure strategy for this observation stream.
-     */
     public Observe<T> withBackpressure(WorkScheduler scheduler, io.reactivex.rxjava3.core.BackpressureStrategy strategy) {
         return new Observe<>(source.observeOn(SchedulerResolver.resolve(scheduler)).onBackpressureBuffer().onBackpressureDrop().toObservable().toFlowable(strategy).map(v -> v), stages, tag);
     }
-
-    // Specialized Operators (Parity with Work)
 
     public Observe<T> require(WorkScheduler scheduler, Predicate<T> condition, Function<T, Throwable> errorSupplier) {
         return thenFunction(scheduler, t -> {
@@ -355,23 +328,13 @@ public final class Observe<T> {
         });
     }
 
-    // Debugging & Logging
-
-    /**
-     * Declarative stage to log the current pipeline state.
-     */
     public Observe<T> log(LogLevel level) {
         return log(level, null);
     }
 
-    /**
-     * Declarative stage to log the current pipeline state with a custom message.
-     */
     public Observe<T> log(LogLevel level, String message) {
         return append(new PipelineStage.LogStage(level, message));
     }
-
-    // Resilience & Recovery
 
     public Observe<T> recover(java.util.function.Function<Throwable, T> fallback) {
         return recover(Throwable.class, fallback);
@@ -389,16 +352,11 @@ public final class Observe<T> {
         return resilience(r -> r.retryIf(max, delay, strategy, condition));
     }
 
-    /**
-     * Applies a resilience policy to the entire preceding pipeline segment.
-     * Note: This applies the policy PER-EMISSION to the preceding stages.
-     */
     public Observe<T> resilience(java.util.function.Consumer<ResiliencePolicy.ResilienceBuilder> config) {
         ResiliencePolicy.ResilienceBuilder builder = new ResiliencePolicy.ResilienceBuilder();
         config.accept(builder);
         ResiliencePolicy.ResilienceMetadata m = builder.build();
 
-        // Encapsulate previous stages into a single ChainStage
         Work<T> segment = new Work<>(this.stages, tag);
         PipelineStage segmentStage = new PipelineStage.ChainStage(val -> segment, m);
 
@@ -407,51 +365,46 @@ public final class Observe<T> {
         return new Observe<>(source, newStages, tag);
     }
 
-    // Resource Management
-
-    /**
-     * Executes the provided action regardless of success or failure.
-     */
     public Observe<T> doFinally(Runnable action) {
         return append(new PipelineStage.FinalStage(action));
     }
 
-    /**
-     * Applies a transformation to this observe pipeline.
-     */
     public <R> Observe<R> compose(java.util.function.Function<Observe<T>, Observe<R>> transformer) {
         return transformer.apply(this);
     }
-
-    // Terminal Operators
 
     public Flowable<T> asFlowable() {
         return ObserveCompiler.compile(stages, tag, source);
     }
 
     public Disposable execute() {
-        return asFlowable().subscribe(
-                t -> { },
-                throwable -> RxLog.e(TAG, "Unhandled Throwable", throwable)
-        );
+        return PipelineSubscriber.subscribe(asFlowable(), null, null, TAG);
     }
 
     public Disposable executeOn(WorkScheduler workScheduler, Consumer<T> onNext, Consumer<Throwable> onError) {
-        return asFlowable()
-                .observeOn(SchedulerResolver.resolve(workScheduler))
-                .subscribe(onNext, onError);
+        return PipelineSubscriber.subscribe(
+                asFlowable().observeOn(SchedulerResolver.resolve(workScheduler)),
+                onNext,
+                onError,
+                TAG
+        );
     }
 
     public Disposable trigger(Work<?> work) {
-        return asFlowable().subscribe(
-            signal -> work.execute(),
-            throwable -> RxLog.e(TAG, "Observe trigger error", throwable)
+        return PipelineSubscriber.subscribe(
+                asFlowable(),
+                signal -> work.execute(),
+                null,
+                TAG
         );
     }
 
     public <R> Disposable trigger(Work<R> work, Consumer<R> onSuccess, Consumer<Throwable> onError) {
-        return asFlowable().flatMapSingle(signal -> 
-            work.asTerminalSingle()
-        ).subscribe(onSuccess, onError);
+        return PipelineSubscriber.subscribe(
+                asFlowable().flatMapSingle(signal -> work.asTerminalSingle()),
+                onSuccess,
+                onError,
+                TAG
+        );
     }
 }

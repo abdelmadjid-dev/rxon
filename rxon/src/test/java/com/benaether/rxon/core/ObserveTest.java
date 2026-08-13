@@ -61,7 +61,6 @@ public class ObserveTest {
             return Done.INSTANCE;
         });
 
-        // Emit 1, 2, 3 rapidly, then 4 after delay
         Flowable<Integer> source = Flowable.concat(
             Flowable.just(1, 2, 3),
             Flowable.just(4).delay(200, TimeUnit.MILLISECONDS)
@@ -74,7 +73,6 @@ public class ObserveTest {
 
         assertTrue("Timed out waiting for debounced triggers", latch.await(2, TimeUnit.SECONDS));
 
-        // 1, 2, 3 are debounced to 3, then 4 is emitted
         assertEquals(2, workCounter.get());
         d.dispose();
     }
@@ -90,7 +88,6 @@ public class ObserveTest {
             return Done.INSTANCE;
         });
 
-        // Emit 1, 2, 3 rapidly, then 4 after delay
         Flowable<Integer> source = Flowable.concat(
             Flowable.just(1, 2, 3),
             Flowable.just(4).delay(200, TimeUnit.MILLISECONDS)
@@ -103,7 +100,6 @@ public class ObserveTest {
 
         assertTrue("Timed out waiting for throttled triggers", latch.await(2, TimeUnit.SECONDS));
 
-        // 1 is taken, 2 and 3 are ignored, then 4 is taken
         assertEquals(2, workCounter.get());
         d.dispose();
     }

@@ -265,7 +265,11 @@ final class PipelineCompiler {
         Single<PipelineResult<Object>> current = stageSingle;
 
         if (m.hasTimeout()) {
-            current = current.timeout(m.timeout().duration(), m.timeout().unit());
+            if (m.timeout().customError() != null) {
+                current = current.timeout(m.timeout().duration(), m.timeout().unit(), Single.error(m.timeout().customError()));
+            } else {
+                current = current.timeout(m.timeout().duration(), m.timeout().unit());
+            }
         }
 
         if (m.hasRetry()) {

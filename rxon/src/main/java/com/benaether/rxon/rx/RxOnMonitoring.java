@@ -36,15 +36,12 @@ public final class RxOnMonitoring {
             return;
         }
 
-        // Enable assembly tracking with the extensions library
         RxJavaAssemblyTracking.enable();
 
-        // Global error handler
         RxJavaPlugins.setErrorHandler(throwable -> {
-            RxOnConfig.getLogger().e(TAG, "Unhandled RxJava error", throwable);
+            RxLog.e(TAG, "Unhandled RxJava error", throwable);
         });
 
-        // Monitor slow tasks
         RxJavaPlugins.setScheduleHandler(runnable -> () -> {
             long start = System.currentTimeMillis();
             try {

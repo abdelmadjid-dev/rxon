@@ -25,10 +25,6 @@ public class WorkTest {
             .init();
     }
 
-    // ===========================================================================================
-    // PIPELINE BASICS
-    // ===========================================================================================
-
     @Test
     public void testSimplePipeline_EmitsTransformedValue() {
         Work.callable(WorkScheduler.IO, () -> 10)
@@ -51,7 +47,6 @@ public class WorkTest {
             .test()
             .awaitDone(2, TimeUnit.SECONDS)
             .assertError(e -> {
-                // Handle possible wrapping
                 Throwable current = e;
                 while (current.getCause() != null && current != expectedError) {
                     current = current.getCause();
@@ -74,10 +69,6 @@ public class WorkTest {
         assertEquals(1, counter.get());
     }
 
-    // ===========================================================================================
-    // TERMINATION & FINISHING
-    // ===========================================================================================
-
     @Test
     public void testBreak_ImmediatelyTerminatesSuccessfully() {
         Work.just(WorkScheduler.COMPUTE, "Early Return")
@@ -98,10 +89,6 @@ public class WorkTest {
             .awaitDone(2, TimeUnit.SECONDS)
             .assertError(error);
     }
-
-    // ===========================================================================================
-    // GUARDS
-    // ===========================================================================================
 
     @Test
     public void testRequire_Success() {

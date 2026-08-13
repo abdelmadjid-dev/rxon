@@ -4,21 +4,15 @@ plugins {
 }
 
 // Ensure Git uses the versioned .githooks folder for commit/push verification.
-// This is performed during Gradle configuration (e.g., IDE Sync).
 val setupGitHooks = tasks.register<Exec>("setupGitHooks") {
     group = "help"
     description = "Configures Git to use the versioned .githooks directory."
     commandLine("git", "config", "core.hooksPath", ".githooks")
 }
 
-// Silently configure git hooks path during build evaluation
+// Configure git hooks path during evaluation in a configuration-cache-safe way
 if (file(".git").exists()) {
-    "git config core.hooksPath .githooks".runCommand(rootDir)
-}
-
-fun String.runCommand(workingDir: File) {
-    ProcessBuilder(*split(" ").toTypedArray())
-        .directory(workingDir)
-        .start()
-        .waitFor()
+    providers.exec {
+        commandLine("git", "config", "core.hooksPath", ".githooks")
+    }.result.orNull
 }

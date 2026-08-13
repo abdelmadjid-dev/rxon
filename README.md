@@ -17,7 +17,7 @@ RxOn is a semantic DSL wrapper for RxJava 3 that enforces architectural patterns
 ### Gradle
 ```kotlin
 dependencies {
-    implementation("com.benaether:rxon:0.3.0-alpha8")
+    implementation("com.benaether:rxon:0.3.0-alpha9")
 }
 ```
 
@@ -26,6 +26,7 @@ dependencies {
 ### Changelogs
 | Version | Documentation | Description |
 | :--- | :--- | :--- |
+| **v0.3.0-alpha9** | [Release Notes](changelogs/v0.3.0-alpha9.md) | Engine Statelessness, Explicit State Merging, PipelineSubscriber, and Emitter Utilities. |
 | **v0.3.0-alpha8** | [Release Notes](changelogs/v0.3.0-alpha8.md) | Release Integrity, Auto-installing Hooks, and Infrastructure isolation. |
 | **v0.3.0-alpha7** | [Release Notes](changelogs/v0.3.0-alpha7.md) | Refined Configuration DSL and Error Mapping Pipeline. |
 | **v0.3.0-alpha6** | [Release Notes](changelogs/v0.3.0-alpha6.md) | (Previously released without persisted changelog) |
