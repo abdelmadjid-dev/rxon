@@ -8,6 +8,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
     - uses: actions/checkout@v4
     - name: Set up JDK 17
@@ -22,6 +25,13 @@ jobs:
 
     - name: Verify Release Integrity
       run: sh .githooks/verify_release.sh
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Publish to Maven Central
       run: ./gradlew :rxon:publishToCentralPortal --no-configuration-cache
