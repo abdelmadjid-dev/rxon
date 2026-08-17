@@ -16,6 +16,7 @@ public sealed interface PipelineStage permits
     PipelineStage.AsyncStage,
     PipelineStage.FailStage,
     PipelineStage.RecoverStage,
+    PipelineStage.RecoverChainStage,
     PipelineStage.ConditionalBreakStage,
     PipelineStage.ConditionalFailStage,
     PipelineStage.ZipStage,
@@ -112,6 +113,21 @@ public sealed interface PipelineStage permits
         @Override
         public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
             return new RecoverStage(type, fallback, resilience);
+        }
+    }
+
+    record RecoverChainStage(
+        Class<? extends Throwable> type,
+        java.util.function.Function<Throwable, Work<?>> fallbackTask,
+        ResiliencePolicy.ResilienceMetadata resilience
+    ) implements PipelineStage {
+        RecoverChainStage(Class<? extends Throwable> type, java.util.function.Function<Throwable, Work<?>> fallbackTask) {
+            this(type, fallbackTask, ResiliencePolicy.ResilienceMetadata.EMPTY);
+        }
+
+        @Override
+        public PipelineStage withResilience(ResiliencePolicy.ResilienceMetadata resilience) {
+            return new RecoverChainStage(type, fallbackTask, resilience);
         }
     }
 

@@ -199,6 +199,32 @@ final class PipelineCompiler {
                 }
                 return Single.error(err);
             });
+        } else if (stage instanceof PipelineStage.RecoverChainStage s) {
+            return chain.onErrorResumeNext(err -> {
+                Throwable root = err instanceof PipelineException pe ? pe.getCause() : err;
+                Throwable match = null;
+                Throwable current = root;
+                while (current != null) {
+                    if (s.type().isInstance(current)) {
+                        match = current;
+                        break;
+                    }
+                    if (current == current.getCause()) break;
+                    current = current.getCause();
+                }
+
+                if (match != null) {
+                    List<Work<Done>> stack = err instanceof PipelineException pe ? pe.getCompensationStack() : java.util.Collections.emptyList();
+                    try {
+                        Work<?> subWork = s.fallbackTask().apply(match);
+                        return compileInternal(subWork.getStages(), subWork.getTag(), null)
+                            .map(subRes -> subRes.mergeCompensations(stack));
+                    } catch (Throwable e) {
+                        return Single.error(new PipelineException(e, null, stack));
+                    }
+                }
+                return Single.error(err);
+            });
         } else if (stage instanceof PipelineStage.ConditionalBreakStage s) {
             return chain.flatMap(prev -> {
                 if (prev.terminated()) return Single.just(prev);

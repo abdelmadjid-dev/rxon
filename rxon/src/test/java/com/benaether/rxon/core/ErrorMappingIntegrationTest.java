@@ -101,4 +101,50 @@ public class ErrorMappingIntegrationTest {
 
         assertTrue("Compensation should have executed", compensationExecuted.get());
     }
+
+    @Test
+    public void testSingleEmitter_ErrorMappingAndCleaning() {
+        Throwable[] receivedError = new Throwable[1];
+
+        Work.singleEmitter(WorkScheduler.IO, emitter -> {
+            emitter.onError(new RuntimeException("SingleEmitter explicit error"));
+        })
+        .asTerminalSingle()
+        .test()
+        .awaitDone(2, TimeUnit.SECONDS)
+        .assertError(t -> {
+            receivedError[0] = t;
+            return t instanceof IllegalStateException && t.getMessage().contains("SingleEmitter explicit error");
+        });
+
+        assertNotNull(receivedError[0]);
+        Throwable cause = receivedError[0].getCause();
+        if (cause != null) {
+            assertFalse("Cause should not be RxJavaAssemblyException",
+                    cause.getClass().getName().contains("AssemblyException"));
+        }
+    }
+
+    @Test
+    public void testCompletableEmitter_ErrorMappingAndCleaning() {
+        Throwable[] receivedError = new Throwable[1];
+
+        Work.completableEmitter(WorkScheduler.IO, emitter -> {
+            throw new RuntimeException("CompletableEmitter thrown error");
+        })
+        .asTerminalSingle()
+        .test()
+        .awaitDone(2, TimeUnit.SECONDS)
+        .assertError(t -> {
+            receivedError[0] = t;
+            return t instanceof IllegalStateException && t.getMessage().contains("CompletableEmitter thrown error");
+        });
+
+        assertNotNull(receivedError[0]);
+        Throwable cause = receivedError[0].getCause();
+        if (cause != null) {
+            assertFalse("Cause should not be RxJavaAssemblyException",
+                    cause.getClass().getName().contains("AssemblyException"));
+        }
+    }
 }

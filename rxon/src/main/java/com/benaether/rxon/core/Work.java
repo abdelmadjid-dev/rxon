@@ -102,7 +102,39 @@ public final class Work<T> {
     }
 
     public static Work<Done> completableEmitter(WorkScheduler scheduler, io.reactivex.rxjava3.functions.Consumer<io.reactivex.rxjava3.core.CompletableEmitter> body) {
-        return Work.completable(scheduler, Completable.create(emitter -> {
+        return Work.completable(scheduler, Completable.create(rawEmitter -> {
+            io.reactivex.rxjava3.core.CompletableEmitter emitter = new io.reactivex.rxjava3.core.CompletableEmitter() {
+                @Override
+                public void onComplete() {
+                    rawEmitter.onComplete();
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    rawEmitter.onError(RxOnConfig.mapError(t));
+                }
+
+                @Override
+                public boolean tryOnError(Throwable t) {
+                    return rawEmitter.tryOnError(RxOnConfig.mapError(t));
+                }
+
+                @Override
+                public void setDisposable(io.reactivex.rxjava3.disposables.Disposable d) {
+                    rawEmitter.setDisposable(d);
+                }
+
+                @Override
+                public void setCancellable(io.reactivex.rxjava3.functions.Cancellable c) {
+                    rawEmitter.setCancellable(c);
+                }
+
+                @Override
+                public boolean isDisposed() {
+                    return rawEmitter.isDisposed();
+                }
+            };
+
             try {
                 body.accept(emitter);
             } catch (Throwable t) {
@@ -114,7 +146,39 @@ public final class Work<T> {
     }
 
     public static <R> Work<R> singleEmitter(WorkScheduler scheduler, io.reactivex.rxjava3.functions.Consumer<io.reactivex.rxjava3.core.SingleEmitter<R>> body) {
-        return Work.single(scheduler, Single.create(emitter -> {
+        return Work.single(scheduler, Single.create(rawEmitter -> {
+            io.reactivex.rxjava3.core.SingleEmitter<R> emitter = new io.reactivex.rxjava3.core.SingleEmitter<R>() {
+                @Override
+                public void onSuccess(R value) {
+                    rawEmitter.onSuccess(value);
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    rawEmitter.onError(RxOnConfig.mapError(t));
+                }
+
+                @Override
+                public boolean tryOnError(Throwable t) {
+                    return rawEmitter.tryOnError(RxOnConfig.mapError(t));
+                }
+
+                @Override
+                public void setDisposable(io.reactivex.rxjava3.disposables.Disposable d) {
+                    rawEmitter.setDisposable(d);
+                }
+
+                @Override
+                public void setCancellable(io.reactivex.rxjava3.functions.Cancellable c) {
+                    rawEmitter.setCancellable(c);
+                }
+
+                @Override
+                public boolean isDisposed() {
+                    return rawEmitter.isDisposed();
+                }
+            };
+
             try {
                 body.accept(emitter);
             } catch (Throwable t) {
@@ -379,6 +443,15 @@ public final class Work<T> {
 
     public Work<T> recover(Class<? extends Throwable> type, java.util.function.Function<Throwable, T> fallback) {
         return append(new PipelineStage.RecoverStage(type, err -> fallback.apply(err)));
+    }
+
+    public Work<T> recoverWith(java.util.function.Function<Throwable, Work<T>> fallbackWorkFunction) {
+        return recoverWith(Throwable.class, fallbackWorkFunction);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Work<T> recoverWith(Class<? extends Throwable> type, java.util.function.Function<Throwable, Work<T>> fallbackWorkFunction) {
+        return append(new PipelineStage.RecoverChainStage(type, err -> (Work<Object>) (Work<?>) fallbackWorkFunction.apply(err)));
     }
 
     public Work<T> retry(int max, long delay, ResiliencePolicy.BackoffStrategy strategy) {
